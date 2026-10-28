@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@grafana/ui';
 import { nearbyPop, routeEndpointSuggestions } from '../kmzAssociations';
-import type { BackboneLink, BackbonePop, ImportedRoute, ImportedWaypoint } from '../types';
+import type { BackboneLink, BackbonePop, ImportedRoute, ImportedWaypoint, KmzLayerSettings } from '../types';
+import { definirConfiguracaoCamadas, projetosKmz, informacaoKmz } from '../geo/layers';
+import type { FeatureIndexada } from '../geo/layers';
+import { ExternalPointsManager } from './ExternalPointsManager';
 
 const control: React.CSSProperties = {
   color: '#fff', background: '#111827', border: '1px solid #526174',
@@ -89,6 +92,8 @@ const RouteRow: React.FC<RouteRowProps> = ({ route, pops, usedLinks, onUpdate, o
         <strong>{route.name}</strong>{' '}{usedLinks.length ? '· Enlace monitorado' : '· Rota KMZ'}
       </summary>
       <small>{numPoints} coordenadas · {route.sourceFile}</small>
+      <small>{informacaoKmz(route).project} · {informacaoKmz(route).category}</small>
+      {!!route.folderPath && <small title={route.folderPath} style={{ overflowWrap: 'anywhere' }}>Pasta: {route.folderPath}</small>}
       <label style={{ fontSize: 12 }}>Origem da rota (POP)</label>
       <select style={control} value={route.sourcePopId ?? ''}
         onChange={e => onUpdate(route.id, { sourcePopId: e.target.value || undefined })}>
@@ -120,6 +125,18 @@ export interface KmzManagerProps {
   pops: BackbonePop[];
   links: BackboneLink[];
   showPreview: boolean;
+  layerSettings?: Partial<KmzLayerSettings>;
+  onLayerSettingsChange: (settings: KmzLayerSettings) => void;
+  externalProjects?: string[];
+  externalStatus?: string;
+  externalCount?: number;
+  externalIndex?: FeatureIndexada[];
+  externalSourceUrl?: string;
+  externalVisible?: boolean;
+  onExternalVisibleChange?: (value: boolean) => void;
+  onLocateExternal?: (item: FeatureIndexada) => void;
+  onCreateExternalPop?: (item: FeatureIndexada) => void;
+  onZoomToExternal?: () => void;
   loading: boolean;
   message: string;
   onTogglePreview: (show: boolean) => void;
@@ -137,11 +154,17 @@ export interface KmzManagerProps {
 }
 
 export const KmzManager: React.FC<KmzManagerProps> = (props) => {
-  const [tab, setTab] = useState<'waypoints' | 'routes'>('waypoints');
+  const [tab, setTab] = useState<'waypoints' | 'routes' | 'external'>('waypoints');
+  const layerSettings = definirConfiguracaoCamadas(props.layerSettings);
+  const projects = useMemo(() => [...new Set([...projetosKmz(props.routes, props.waypoints), ...(props.externalProjects ?? [])])].sort((a,b) => a.localeCompare(b, 'pt-BR')), [props.routes, props.waypoints, props.externalProjects]);
+  const changeLayer = (patch: Partial<KmzLayerSettings>) => props.onLayerSettingsChange({ ...layerSettings, ...patch });
   const [search, setSearch] = useState('');
   const filtered = search.trim().toLocaleLowerCase('pt-BR');
   const routes = useMemo(() => props.routes.filter(route =>
-    route.name.toLocaleLowerCase('pt-BR').includes(filtered) || route.sourceFile.toLocaleLowerCase('pt-BR').includes(filtered)
+    route.name.toLocaleLowerCase('pt-BR').includes(filtered) ||
+    route.sourceFile.toLocaleLowerCase('pt-BR').includes(filtered) ||
+    informacaoKmz(route).project.toLocaleLowerCase('pt-BR').includes(filtered) ||
+    (route.folderPath ?? '').toLocaleLowerCase('pt-BR').includes(filtered)
   ), [props.routes, filtered]);
   const waypoints = useMemo(() => props.waypoints.filter(point =>
     point.name.toLocaleLowerCase('pt-BR').includes(filtered) ||
@@ -160,6 +183,44 @@ export const KmzManager: React.FC<KmzManagerProps> = (props) => {
         <input type="checkbox" checked={props.showPreview} onChange={e => props.onTogglePreview(e.target.checked)}/>
         Mostrar rotas não vinculadas e pontos de referência
       </label>
+      <fieldset style={{ border: '1px solid #405065', borderRadius: 6, padding: 9, display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <legend style={{ fontSize: 12, padding: '0 4px' }}>Camadas KMZ · v1.2</legend>
+        <label style={{ fontSize: 12 }}>Projeto visível</label>
+        <select style={control} value={layerSettings.project}
+          onChange={e => changeLayer({ project: e.target.value })}>
+          <option value="">Todos os projetos</option>
+          {projects.map(project => <option key={project} value={project}>{project}</option>)}
+        </select>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px' }}>
+          {([['backbone', 'Backbone'], ['ftth', 'FTTH'], ['outros', 'Outros'], ['points', 'Pontos']] as const).map(([key, label]) => (
+            <label key={key} style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>
+              <input type="checkbox" checked={layerSettings[key]} onChange={e => changeLayer({ [key]: e.target.checked })}/>
+              {label}
+            </label>
+          ))}
+        </div>
+        <label style={{ fontSize: 12 }}>Mostrar FTTH a partir do zoom</label>
+        <select style={control} value={layerSettings.minZoomFtth}
+          onChange={e => changeLayer({ minZoomFtth: Number(e.target.value) })}>
+          <option value={0}>Sempre (compatível com v1.1)</option>
+          <option value={11}>11 · Região</option>
+          <option value={13}>13 · Cidade</option>
+          <option value={15}>15 · Rua</option>
+        </select>
+        <small>Filtros afetarão somente as rotas e os pontos de referência. Enlaces monitorados e POPs permanecem visíveis.</small>
+      </fieldset>
+      {!!props.externalCount && props.onExternalVisibleChange && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
+          <input type="checkbox" checked={props.externalVisible ?? false} onChange={e => props.onExternalVisibleChange?.(e.target.checked)}/>
+          Mostrar GeoJSON externo (independente das rotas KMZ importadas)
+        </label>
+      )}
+      {!!props.externalStatus && <small style={{ fontSize: 12, color: '#a5d7ee', overflowWrap: 'anywhere' }}>GeoJSON externo: {props.externalStatus}</small>}
+      {!!props.externalCount && props.externalCount > 0 && props.onZoomToExternal && (
+        <Button size="sm" variant="secondary" onClick={props.onZoomToExternal}>
+          Enquadrar projeto GeoJSON no mapa
+        </Button>
+      )}
       {!!props.message && <small style={{ color: props.message.startsWith('Erro') ? '#ff7b8c' : '#b9e8ff', overflowWrap: 'anywhere' }}>{props.message}</small>}
       <div style={{ display: 'flex', gap: 6 }}>
         <Button size="sm" variant={tab === 'waypoints' ? 'primary' : 'secondary'} onClick={() => { setTab('waypoints'); setSearch(''); }}>
@@ -168,10 +229,19 @@ export const KmzManager: React.FC<KmzManagerProps> = (props) => {
         <Button size="sm" variant={tab === 'routes' ? 'primary' : 'secondary'} onClick={() => { setTab('routes'); setSearch(''); }}>
           Rotas ({props.routes.length})
         </Button>
+        {!!props.externalCount && <Button size="sm" variant={tab === 'external' ? 'primary' : 'secondary'}
+          onClick={() => { setTab('external'); setSearch(''); }}>
+          Pontos GeoJSON
+        </Button>}
       </div>
-      <input style={control} value={search} onChange={e => setSearch(e.target.value)}
-        placeholder={tab === 'waypoints' ? 'Pesquisar ponto ou POP...' : 'Pesquisar trajeto...'} />
-      {tab === 'waypoints' ? (
+      {tab !== 'external' && <input style={control} value={search} onChange={e => setSearch(e.target.value)}
+        placeholder={tab === 'waypoints' ? 'Pesquisar ponto ou POP...' : 'Pesquisar trajeto...'} />}
+      {tab === 'external' ? (
+        <ExternalPointsManager index={props.externalIndex ?? []} pops={props.pops}
+          sourceUrl={props.externalSourceUrl ?? ''} project={layerSettings.project}
+          onLocate={item => props.onLocateExternal?.(item)}
+          onCreatePop={item => props.onCreateExternalPop?.(item)} />
+      ) : tab === 'waypoints' ? (
         <>
           <small>POPs vinculados: {linkedCount}/{props.waypoints.length}. Clique na seta de um ponto para renomear ou converter.</small>
           {waypoints.length === 0 && <small>Nenhum ponto encontrado.</small>}

@@ -1,0 +1,98 @@
+/* TEIF v1.2: trilho compacto; painel de detalhes somente sob demanda. */
+.teif-ops-shell {
+  pointer-events: auto;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 0;
+  max-height: 100%;
+  width: 48px;
+  transition: width .14s ease;
+  font-family: inherit;
+  color: #eaf2fb;
+  font-size: 12px;
+}
+.teif-ops-shell * { box-sizing: border-box; }
+.teif-ops-rail {
+  width: 48px;
+  flex: 0 0 48px;
+  height: max-content;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  background: rgba(13, 22, 35, 0.95);
+  padding: 7px 5px;
+  border-radius: 9px;
+  border: 1px solid #375266;
+  box-shadow: 0 6px 24px rgba(0,0,0,.4);
+}
+.teif-rail-button {
+  position: relative;
+  width: 36px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: #223346;
+  color: #d5ebf6;
+  cursor: pointer;
+  padding: 0;
+}
+.teif-rail-button:hover, .teif-rail-button:focus-visible { background: #304861; border-color: #73bde2; outline-offset: 2px; }
+.teif-rail-button.active { background: #214d7a; border-color: #55a7e8; }
+.teif-rail-button:disabled { opacity: .35; cursor: not-allowed; }
+.teif-rail-symbol { font-size: 27px; line-height: 1; }
+.teif-rail-alert { background: #39252f; color: #f0b3bf; border-color: #6b3d47; }
+.teif-rail-alert.has-alarm { background: #531c2c; color: #fff; border-color: #f23e62; }
+.teif-rail-alert.has-alarm.active { background: #7c1633; }
+.teif-rail-bang { font-weight: 800; font-size: 20px; line-height: 23px; border: 2px solid currentColor; border-radius: 50%; width: 24px; height: 24px; text-align: center; }
+.teif-rail-count { position: absolute; top: -5px; right: -6px; min-width: 16px; height: 16px; border-radius: 9px; background: #f83f61; color: white; font-size: 10px; padding: 2px 3px; font-weight: 800; line-height: 12px; box-shadow: 0 0 0 2px #101b2c; }
+.teif-ops-drawer {
+  background: rgba(13, 20, 32, .975);
+  border: 1px solid #33485d;
+  border-radius: 9px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.45);
+  width: 330px;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+.teif-ops-header { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 12px; border-bottom: 1px solid #334257; flex-shrink: 0; }
+.teif-ops-header strong { display: block; font-size: 13px; }
+.teif-ops-header small { display: block; color: #91b4c9; margin-top: 3px; }
+.teif-ops-header button { color: #e8f6ff; background: #243449; border: 1px solid #40536b; border-radius: 4px; cursor: pointer; padding: 2px 9px; font-size: 18px; }
+.teif-ops-scroll { padding: 10px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.teif-ops-section-title { font-size: 11px; text-transform: uppercase; font-weight: 700; color: #9ebfd5; margin: 12px 0 7px; }
+.teif-ops-counters { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
+.teif-ops-counters div { text-align: center; background: #1c2838; border: 1px solid #33445a; border-radius: 6px; padding: 8px 3px; }
+.teif-ops-counters strong { display: block; font-size: 17px; }
+.teif-ops-counters small { display: block; font-size: 10px; color: #c4d7e5; }
+.teif-ops-states { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; }
+.teif-ops-states div { display: flex; align-items: center; gap: 6px; background: #1c2838; padding: 8px 6px; border: 1px solid #33445a; border-radius: 5px; }
+.teif-ops-states div:last-child:nth-child(odd) { grid-column: 1/-1; }
+.teif-ops-states strong { margin-left: auto; }
+.teif-dot { display: inline-block; height: 7px; width: 7px; border-radius: 50%; flex-shrink: 0; background: #929dad; }
+.teif-dot.down { background: #ff426b; }.teif-dot.warning { background: #ffc03a; }.teif-dot.ok { background: #27bb80; }.teif-dot.no-data { background: #a8b2c2; }
+.teif-ops-footnote { display: block; margin: 8px 0; color: #a8bdce; font-size: 10px; line-height: 1.5; }
+.teif-ops-search { width: 100%; min-height: 34px; background: #141e2b; color: #eaf5ff; border: 1px solid #4b6078; border-radius: 5px; padding: 7px 9px; }
+.teif-ops-results { display: flex; flex-direction: column; gap: 6px; }
+.teif-ops-entry { width: 100%; display: flex; flex-direction: column; text-align: left; gap: 4px; cursor: pointer; background: #1a2636; color: #f0f7ff; border: 1px solid #34465b; padding: 9px; border-radius: 5px; font: inherit; }
+.teif-ops-entry:hover, .teif-ops-entry:focus-visible { border-color: #42c9e2; background: #28384b; }
+.teif-ops-entry-top { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+.teif-ops-entry-top > span { font-size: 12px; font-weight: 600; flex: 1; overflow-wrap: anywhere; }
+.teif-ops-entry small { color: #9db5c8; overflow-wrap: anywhere; }
+.teif-status { font-style: normal; font-size: 9px; font-weight: 800; flex-shrink: 0; white-space: nowrap; padding: 3px 5px; border-radius: 4px; border: 1px solid #4b586d; color: #c7d0df; }
+.teif-status.down { border-color: #dd3157; color: #ff829a; }.teif-status.warning { border-color: #b38b24; color: #facc58; }.teif-status.ok { border-color: #188e67; color: #71ecc0; }
+.teif-ops-empty { margin: 6px 0; color: #9bb4c8; text-align: center; padding: 14px 7px; }
+
+.teif-ops-shell.expanded { width: min(390px, calc(100vw - 24px)); }

@@ -32,8 +32,29 @@ export type PopAlertRule = LinkAlertRule;
 /** Posição geográfica [latitude, longitude] no formato Leaflet. */
 export type MapLatLng = [number, number];
 
+/** Metadados opcionais: dashboards existentes continuam válidos. */
+export type KmzCategory = 'backbone' | 'ftth' | 'outros';
+
+export interface KmzFeatureMetadata {
+  /** Caminho original das pastas KML, sem modificar o nome da rota. */
+  folderPath?: string;
+  project?: string;
+  category?: KmzCategory;
+}
+
+export interface KmzLayerSettings {
+  /** String vazia indica todos os projetos. */
+  project: string;
+  backbone: boolean;
+  ftth: boolean;
+  outros: boolean;
+  points: boolean;
+  /** 0 = sempre; 13 = somente após aproximar até o nível 13. */
+  minZoomFtth: number;
+}
+
 /** Uma rota KML pode ter vários trechos não contínuos (MultiGeometry). */
-export interface ImportedRoute {
+export interface ImportedRoute extends KmzFeatureMetadata {
   id: string;
   name: string;
   sourceFile: string;
@@ -44,7 +65,7 @@ export interface ImportedRoute {
 }
 
 /** Referência do KML; não cria automaticamente um POP monitorado. */
-export interface ImportedWaypoint {
+export interface ImportedWaypoint extends KmzFeatureMetadata {
   id: string;
   name: string;
   sourceFile: string;
@@ -60,6 +81,8 @@ export interface BackbonePop {
   longitude: number;
   /** ID do waypoint que deu origem a este POP, quando aplicável. */
   importedWaypointId?: string;
+  /** Origem de um POP confirmado manualmente a partir de GeoJSON externo. */
+  externalGeojsonSource?: { url: string; featureId: string };
   monitoringFields?: MonitorField[];
   /** Opcional: campo e condição que deixam o POP vermelho pulsante. */
   alertRule?: PopAlertRule;
@@ -74,6 +97,8 @@ export interface BackboneLink {
   width: number;
   /** Quando definido, desenha o trajeto importado em vez da linha reta. */
   routeId?: string;
+  /** Referência(s) ao GeoJSON externo. Os trechos permanecem no arquivo, não no JSON do dashboard. */
+  externalGeojsonRoute?: { url: string; featureIds: string[] };
   monitoringFields?: MonitorField[];
   alertRule?: LinkAlertRule;
 }
@@ -90,4 +115,10 @@ export interface SimpleOptions {
   importedWaypoints?: ImportedWaypoint[];
   /** Exibir rotas e pontos de referência que não são um enlace vinculado. */
   showKmzPreview?: boolean;
+  /** Filtros das geometrias de referência; não ocultam enlaces monitorados. */
+  kmzLayerSettings?: Partial<KmzLayerSettings>;
+  /** URL HTTPS ou caminho HTTP relativo para GeoJSON externo. Dados não são salvos no dashboard. */
+  externalGeojsonUrl?: string;
+  /** Controle independente de visibilidade; undefined preserva comportamento antigo. */
+  showExternalGeojson?: boolean;
 }

@@ -30,6 +30,13 @@ export const plugin = new PanelPlugin<SimpleOptions>(
           max: 180,
         },
       })
+      .addTextInput({
+        path: 'externalGeojsonUrl',
+        name: 'GeoJSON externo (v1.2)',
+        description: 'URL HTTP(S) do GeoJSON geográfico. Preferir /public/plugins/<id>/maps/arquivo.geojson. Não salva geometrias no dashboard.',
+        category: ['Mapa'],
+        defaultValue: '',
+      })
       .addNumberInput({
         path: 'zoom',
         name: 'Zoom inicial',

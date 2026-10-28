@@ -1,5 +1,6 @@
 import JSZip from 'jszip';
 import type { ImportedRoute, ImportedWaypoint, MapLatLng } from './types';
+import { classificarElementoKmz } from './geo/layers';
 
 /**
  * Importador local KMZ/KML. Não faz upload do arquivo nem executa conteúdo KML.
@@ -71,6 +72,20 @@ function coordinatesInside(root: Element): string | undefined {
   return descendantsByName(root, 'coordinates')[0]?.textContent?.trim();
 }
 
+/** Recupera os nomes das pastas ancestrais de cada Placemark no KML. */
+function folderPathOf(placemark: Element): string {
+  const names: string[] = [];
+  let node: Element | null = placemark.parentElement;
+  while (node) {
+    if (node.localName === 'Folder' || node.localName === 'Document') {
+      const name = directChildText(node, 'name');
+      if (name) { names.unshift(name.slice(0, 120)); }
+    }
+    node = node.parentElement;
+  }
+  return names.join('/');
+}
+
 function shortText(text: string, fallback: string): string {
   return text.trim().slice(0, 120) || fallback;
 }
@@ -102,6 +117,8 @@ export function parseKmlText(xml: string, sourceFile: string): ImportedMapData {
   const waypoints: ImportedWaypoint[] = [];
   for (const placemark of placemarks) {
     const name = shortText(directChildText(placemark, 'name') ?? '', `Trajeto ${routes.length + 1}`);
+    const folderPath = folderPathOf(placemark);
+    const metadata = classificarElementoKmz(name, folderPath);
     const segments: MapLatLng[][] = [];
     for (const line of descendantsByName(placemark, 'LineString')) {
       const raw = coordinatesInside(line);
@@ -114,7 +131,7 @@ export function parseKmlText(xml: string, sourceFile: string): ImportedMapData {
       if (coords.length >= 2) { segments.push(coords); }
     }
     if (segments.length) {
-      routes.push({ id: newId('route'), name, sourceFile, segments });
+      routes.push({ id: newId('route'), name, sourceFile, segments, folderPath, ...metadata });
     }
     for (const point of descendantsByName(placemark, 'Point')) {
       const raw = coordinatesInside(point);
@@ -122,7 +139,7 @@ export function parseKmlText(xml: string, sourceFile: string): ImportedMapData {
       const coords = parseKmlCoordinates(raw);
       if (coords.length) {
         waypoints.push({
-          id: newId('waypoint'), name, sourceFile, position: coords[0],
+          id: newId('waypoint'), name, sourceFile, position: coords[0], folderPath, ...metadata,
         });
       }
     }

@@ -6,6 +6,11 @@ import type { LinkAlertReason } from '../monitoring';
 import { MonitorFieldsEditor, MonitorFieldsReadout } from './MonitorFieldsEditor';
 import { importMapFile, validateGeometry } from '../kmz';
 import { KmzManager } from './KmzManager';
+import { LayerQuickControls } from './LayerQuickControls';
+import { OperationSidebar } from './OperationSidebar';
+import { camadaVisivel, candidatosGeojson, criarIndiceCamadas, definirConfiguracaoCamadas, filtrarCamadas, informacaoKmz, posicaoCandidato } from '../geo/layers';
+import type { FeatureIndexada, GeoJSONDaRede } from '../geo/layers';
+import { criarCamadaGeoJson, segmentosDeFibraGeoJson } from '../geo/renderer';
 import { linksConnectedToPop, nearbyPop, routesConnectedToPop } from '../kmzAssociations';
 import type { AlertOperator, LinkAlertRule, MonitorField, PopAlertRule } from '../types';
 import * as L from 'leaflet';
@@ -23,6 +28,9 @@ import type {
 } from '../types';
 
 type Props = PanelProps<SimpleOptions>;
+
+// Navegação local: permite voltar pelo mesmo caminho, sem gravar nada no dashboard.
+type NavigationEntry = { kind: 'pop' | 'link'; id: string };
 
 // ========================================
 // CONFIGURAÇÕES INICIAIS
@@ -210,6 +218,53 @@ const AlertReasons: React.FC<{
   );
 };
 
+// Popup de monitoramento: cabeçalho compacto, com retorno ao contexto anterior.
+const PopupHeader: React.FC<{
+  title: string;
+  backTo?: string;
+  onBack: () => void;
+  onClose: () => void;
+}> = ({ title, backTo, onBack, onClose }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+    {backTo && (
+      <Button size="sm" variant="secondary" onClick={onBack} title={`Voltar para ${backTo}`}>
+        ← Voltar
+      </Button>
+    )}
+    <strong style={{ flex: 1, minWidth: 0, fontSize: 13, overflowWrap: 'anywhere' }} title={title}>
+      {title}
+    </strong>
+    <Button size="sm" variant="secondary" onClick={onClose} title="Fechar popup">
+      Fechar
+    </Button>
+  </div>
+);
+
+// Seções abertas são memorizadas por POP/enlace, mesmo ao navegar e voltar.
+const PopupSection: React.FC<{
+  title: string;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}> = ({ title, count, expanded, onToggle, children }) => (
+  <div style={{ borderTop: '1px solid #34445a', paddingTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={expanded}
+      style={{
+        width: '100%', cursor: 'pointer', border: 0, background: 'transparent', color: '#e8f3ff',
+        display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', textAlign: 'left',
+      }}
+    >
+      <span style={{ flex: 1, fontSize: 12, fontWeight: 700 }}>{title} ({count})</span>
+      <span aria-hidden="true" style={{ color: '#9dd2e6' }}>{expanded ? '▾' : '▸'}</span>
+    </button>
+    {expanded && <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{children}</div>}
+  </div>
+);
+
 // ========================================
 // COMPONENTE PRINCIPAL
 // ========================================
@@ -227,10 +282,14 @@ export const SimplePanel: React.FC<Props> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const baseTileRef = useRef<L.TileLayer | null>(null);
 
   const markersRef = useRef<L.LayerGroup | null>(null);
   const linksRef = useRef<L.LayerGroup | null>(null);
   const kmzPreviewRef = useRef<L.LayerGroup | null>(null);
+  const externalGeojsonRef = useRef<L.LayerGroup | null>(null);
+  const externalHighlightRef = useRef<L.LayerGroup | null>(null);
+  const candidateFocusRef = useRef<L.Layer | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Mantém as opções atualizadas nos eventos
@@ -275,6 +334,9 @@ export const SimplePanel: React.FC<Props> = ({
   // ======================================
 
   const [editMode, setEditMode] = useState(false);
+  // Preferências de apresentação são locais: não sobrescrevem o JSON do dashboard.
+  const [viewMode, setViewMode] = useState<'noc' | 'projeto'>('noc');
+  const [baseMap, setBaseMap] = useState<'osm' | 'satelite'>('osm');
 
   // POPs
   const [adding, setAdding] = useState(false);
@@ -312,6 +374,16 @@ export const SimplePanel: React.FC<Props> = ({
   const [kmzManagerOpen, setKmzManagerOpen] = useState(false);
   const [kmzLoading, setKmzLoading] = useState(false);
   const [kmzMessage, setKmzMessage] = useState('');
+  const [externalIndex, setExternalIndex] = useState<FeatureIndexada[]>([]);
+  const [externalProjects, setExternalProjects] = useState<string[]>([]);
+  const [externalStatus, setExternalStatus] = useState('Não configurado');
+  // Uma referência geográfica pode ser selecionada, mas só vira enlace após associação explícita.
+  const [selectedExternalId, setSelectedExternalId] = useState<string | null>(null);
+  const [externalSourcePopId, setExternalSourcePopId] = useState('');
+  const [externalTargetPopId, setExternalTargetPopId] = useState('');
+  const [externalExistingLinkId, setExternalExistingLinkId] = useState('');
+  const [externalMessage, setExternalMessage] = useState('');
+  const [layerViewerOpen, setLayerViewerOpen] = useState(false);
   const [creatingLink, setCreatingLink] =
     useState(false);
 
@@ -324,6 +396,8 @@ export const SimplePanel: React.FC<Props> = ({
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [editLinkName, setEditLinkName] = useState('');
   const [confirmDeleteLink, setConfirmDeleteLink] = useState(false);
+  const [navigationHistory, setNavigationHistory] = useState<NavigationEntry[]>([]);
+  const [expandedPopupSections, setExpandedPopupSections] = useState<Record<string, boolean>>({});
 
   const selectedPop = pops.find(
     (pop) => pop.id === selectedId
@@ -332,18 +406,208 @@ export const SimplePanel: React.FC<Props> = ({
     ? popHealthReport(selectedPop.alertRule, selectedPop.monitoringFields ?? [], queryItems)
     : null;
 
-  const originPop = pops.find(
-    (pop) => pop.id === linkOriginId
-  );
+  const selectedExternal = externalIndex.find(item => item.id === selectedExternalId &&
+    segmentosDeFibraGeoJson(item).length > 0);
+  const geojsonById = useMemo(() => new Map(externalIndex.map(item => [item.id, item])), [externalIndex]);
+  const externalSourceUrl = (options.externalGeojsonUrl ?? '').trim();
+  const externalLinkedTo = selectedExternal ? links.filter(link =>
+    link.externalGeojsonRoute?.url === externalSourceUrl &&
+    link.externalGeojsonRoute.featureIds.includes(selectedExternal.id)) : [];
+
   const selectedLink = links.find((link) => link.id === selectedLinkId);
   const selectedLinkReport = selectedLink
     ? linkHealthReport(selectedLink.alertRule, selectedLink.monitoringFields ?? [], queryItems)
     : null;
 
+  // A sidebar utiliza os mesmos estados do popup. Um enlace sem regra nunca entra como UP.
+  const locatePopOnMap = (popId: string) => {
+    const pop = (optionsRef.current.pops ?? []).find(item => item.id === popId);
+    if (!pop || !mapRef.current) { return; }
+    mapRef.current.flyTo([pop.latitude, pop.longitude], Math.max(mapRef.current.getZoom(), 12), { duration: 0.5 });
+  };
+
+  const locateLinkOnMap = (linkId: string) => {
+    const current = optionsRef.current;
+    const link = (current.links ?? []).find(item => item.id === linkId);
+    const map = mapRef.current;
+    if (!link || !map) { return; }
+    const externalParts = link.externalGeojsonRoute?.url === (current.externalGeojsonUrl ?? '').trim()
+      ? link.externalGeojsonRoute.featureIds.flatMap(id => {
+          const item = geojsonById.get(id);
+          return item ? segmentosDeFibraGeoJson(item) : [];
+        }) : [];
+    const local = (current.importedRoutes ?? []).find(item => item.id === link.routeId);
+    const segments = externalParts.length ? externalParts : local ? leafletRouteSegments(local) : [];
+    if (segments.length) {
+      const bounds = L.latLngBounds(segments.flat());
+      if (bounds.isValid()) { map.fitBounds(bounds.pad(0.12), { maxZoom: 15 }); return; }
+    }
+    const a = (current.pops ?? []).find(pop => pop.id === link.sourcePopId);
+    const b = (current.pops ?? []).find(pop => pop.id === link.targetPopId);
+    if (a && b) { map.fitBounds([[a.latitude, a.longitude], [b.latitude, b.longitude]], { padding: [35, 35], maxZoom: 15 }); }
+  };
+
+  // Abre POP ou enlace sem perder o contexto de origem. Os marcadores do mapa
+  // continuam sendo atalhos diretos e iniciam uma navegação nova.
+  const navigateToPop = (popId: string, rememberCurrent = true) => {
+    const pop = pops.find((item) => item.id === popId);
+    if (!pop) { return; }
+    if (rememberCurrent) {
+      if (selectedLinkId) {
+        setNavigationHistory((history) => [...history, { kind: 'link', id: selectedLinkId }]);
+      } else if (selectedId && selectedId !== popId) {
+        setNavigationHistory((history) => [...history, { kind: 'pop', id: selectedId }]);
+      }
+    }
+    setSelectedLinkId(null);
+    setSelectedExternalId(null);
+    setSelectedId(pop.id);
+    setEditName(pop.name);
+    setConfirmDelete(false);
+    setConfirmDeleteLink(false);
+  };
+
+  const navigateToLink = (linkId: string, rememberCurrent = true) => {
+    const link = links.find((item) => item.id === linkId);
+    if (!link) { return; }
+    if (rememberCurrent) {
+      if (selectedId) {
+        setNavigationHistory((history) => [...history, { kind: 'pop', id: selectedId }]);
+      } else if (selectedLinkId && selectedLinkId !== linkId) {
+        setNavigationHistory((history) => [...history, { kind: 'link', id: selectedLinkId }]);
+      }
+    }
+    setSelectedId(null);
+    setSelectedExternalId(null);
+    setSelectedLinkId(link.id);
+    setEditLinkName(link.name);
+    setConfirmDelete(false);
+    setConfirmDeleteLink(false);
+  };
+
+  const previousView = navigationHistory[navigationHistory.length - 1];
+  const previousViewName = previousView
+    ? (previousView.kind === 'pop'
+      ? pops.find((item) => item.id === previousView.id)?.name
+      : links.find((item) => item.id === previousView.id)?.name)
+    : undefined;
+
+  const goBackInNavigation = () => {
+    if (!previousView) { return; }
+    setNavigationHistory((history) => history.slice(0, -1));
+    if (previousView.kind === 'pop') {
+      navigateToPop(previousView.id, false);
+    } else {
+      navigateToLink(previousView.id, false);
+    }
+  };
+
+  const popupSectionOpen = (key: string) => Boolean(expandedPopupSections[key]);
+  const togglePopupSection = (key: string) => {
+    setExpandedPopupSections((previous) => ({ ...previous, [key]: !previous[key] }));
+  };
+
   // Atualizações mantêm os dados existentes e escrevem no JSON do painel.
   const changeCurrentOptions = (next: SimpleOptions) => {
     optionsRef.current = next;
     changeRef.current(next);
+  };
+
+  // Os dados geográficos externos são referências. A promoção de POP é manual e rastreável.
+  const locateExternalCandidate = (item: FeatureIndexada) => {
+    const position = posicaoCandidato(item);
+    const map = mapRef.current;
+    if (!position || !map) { return; }
+    if (candidateFocusRef.current) { map.removeLayer(candidateFocusRef.current); }
+    map.flyTo(position, Math.max(map.getZoom(), 14));
+    const focus = L.circleMarker(position, {
+      radius: 11, color: '#fff', weight: 3, fillColor: '#00cfb3', fillOpacity: 0.85,
+      interactive: false,
+    }).addTo(map);
+    const text = document.createElement('span');
+    text.textContent = `${String(item.feature.properties?.name ?? 'Ponto')} · candidato ${item.tipoPonto.toUpperCase()}`;
+    focus.bindTooltip(text, { permanent: true, direction: 'top', offset: [0, -8] }).openTooltip();
+    candidateFocusRef.current = focus;
+  };
+
+  const createExternalPop = (item: FeatureIndexada) => {
+    const position = posicaoCandidato(item);
+    const sourceUrl = (optionsRef.current.externalGeojsonUrl ?? '').trim();
+    if (!position || !sourceUrl || (item.tipoPonto !== 'pop' && item.tipoPonto !== 'hub')) { return; }
+    const current = optionsRef.current;
+    if ((current.pops ?? []).some(pop => pop.externalGeojsonSource?.url === sourceUrl &&
+        pop.externalGeojsonSource.featureId === item.id)) {
+      setKmzMessage('Esse ponto GeoJSON já está cadastrado como POP.'); return;
+    }
+    const near = nearbyPop(position, current.pops ?? [], 10);
+    if (near) {
+      setKmzMessage(`Já existe POP próximo (${near.name}, até 10 m). Não foi criado outro.`);
+      return;
+    }
+    if ((current.pops ?? []).length >= 500) {
+      setKmzMessage('Limite de segurança de 500 POPs por painel atingido.'); return;
+    }
+    const pop: BackbonePop = {
+      id: `pop-geojson-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      name: String(item.feature.properties?.name ?? 'POP GeoJSON').trim().slice(0, 120) || 'POP GeoJSON',
+      latitude: Number(position[0].toFixed(7)),
+      longitude: Number(position[1].toFixed(7)),
+      externalGeojsonSource: { url: sourceUrl, featureId: item.id },
+    };
+    changeCurrentOptions({ ...current, pops: [...(current.pops ?? []), pop] });
+    setKmzMessage(`POP ${pop.name} criado com origem GeoJSON. Configure o monitoramento selecionando o POP no mapa.`);
+    setSelectedLinkId(null);
+    setSelectedId(pop.id);
+    setEditName(pop.name);
+    locateExternalCandidate(item);
+  };
+
+  // Associa um trecho escolhido do GeoJSON a um enlace existente sem duplicar coordenadas.
+  const attachExternalRoute = () => {
+    const item = selectedExternal;
+    const current = optionsRef.current;
+    const link = (current.links ?? []).find(link => link.id === externalExistingLinkId);
+    const url = (current.externalGeojsonUrl ?? '').trim();
+    if (!item || !link || !url) { setExternalMessage('Selecione um trecho e um enlace existente.'); return; }
+    if (link.externalGeojsonRoute && link.externalGeojsonRoute.url !== url) {
+      setExternalMessage('Este enlace já usa outro GeoJSON. Remova a associação antiga antes de alterá-lo.');
+      return;
+    }
+    const ids = [...new Set([...(link.externalGeojsonRoute?.featureIds ?? []), item.id])];
+    if (ids.length > 100) { setExternalMessage('Limite de 100 trechos por enlace.'); return; }
+    changeCurrentOptions({ ...current, links: (current.links ?? []).map(value => value.id === link.id ? {
+      ...value, routeId: undefined, externalGeojsonRoute: { url, featureIds: ids },
+    } : value) });
+    setExternalMessage('Trecho associado. Configure as métricas no editor do enlace.');
+    setSelectedExternalId(null);
+    setSelectedLinkId(link.id);
+    setEditLinkName(link.name);
+    setSelectedId(null);
+  };
+
+  const createLinkWithExternalRoute = () => {
+    const item = selectedExternal;
+    const current = optionsRef.current;
+    const url = (current.externalGeojsonUrl ?? '').trim();
+    const source = (current.pops ?? []).find(pop => pop.id === externalSourcePopId);
+    const target = (current.pops ?? []).find(pop => pop.id === externalTargetPopId);
+    if (!item || !url || !source || !target || source.id === target.id) {
+      setExternalMessage('Selecione dois POPs diferentes para criar o enlace.'); return;
+    }
+    const newLink: BackboneLink = {
+      id: `link-geojson-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      name: `${source.name} - ${target.name}`,
+      sourcePopId: source.id,
+      targetPopId: target.id,
+      color: '#00FF66', width: 4,
+      externalGeojsonRoute: { url, featureIds: [item.id] },
+    };
+    changeCurrentOptions({ ...current, links: [...(current.links ?? []), newLink] });
+    setSelectedExternalId(null);
+    setSelectedId(null);
+    setSelectedLinkId(newLink.id);
+    setEditLinkName(newLink.name);
+    setExternalMessage('');
   };
 
   const handleKmlImport = async (file: File | undefined): Promise<void> => {
@@ -537,18 +801,16 @@ export const SimplePanel: React.FC<Props> = ({
       initial.zoom
     );
 
-    // OpenStreetMap
-    L.tileLayer(
-      'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {
-        maxZoom: 19,
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }
-    ).addTo(map);
+    // OpenStreetMap começa como fundo; alternância não recria o mapa nem os POPs.
+    baseTileRef.current = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
 
     // Rotas de referência ficam abaixo dos enlaces monitorados.
     const kmzPreviewGroup = L.layerGroup().addTo(map);
+    const externalGeojsonGroup = L.layerGroup().addTo(map);
+    const externalHighlightGroup = L.layerGroup().addTo(map);
 
     // Camada dos enlaces
     const linkGroup = L.layerGroup().addTo(map);
@@ -560,6 +822,8 @@ export const SimplePanel: React.FC<Props> = ({
     mapRef.current = map;
     linksRef.current = linkGroup;
     kmzPreviewRef.current = kmzPreviewGroup;
+    externalGeojsonRef.current = externalGeojsonGroup;
+    externalHighlightRef.current = externalHighlightGroup;
     markersRef.current = markerGroup;
 
     const frame = requestAnimationFrame(() => {
@@ -573,11 +837,36 @@ export const SimplePanel: React.FC<Props> = ({
       map.remove();
 
       mapRef.current = null;
+      baseTileRef.current = null;
       markersRef.current = null;
       linksRef.current = null;
       kmzPreviewRef.current = null;
+      externalGeojsonRef.current = null;
+      externalHighlightRef.current = null;
+      candidateFocusRef.current = null;
     };
   }, []);
+
+  // Modo satélite opcional, apenas visual. Mantém o mesmo sistema de coordenadas.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) { return; }
+    const old = baseTileRef.current;
+    if (old) { map.removeLayer(old); }
+    const tile = baseMap === 'satelite'
+      ? L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          maxZoom: 19,
+          maxNativeZoom: 19,
+          attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics and the GIS User Community',
+        })
+      : L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        });
+    tile.addTo(map);
+    tile.bringToBack();
+    baseTileRef.current = tile;
+  }, [baseMap]);
 
   // ======================================
   // 2. ATUALIZAR POSIÇÃO DO MAPA
@@ -615,33 +904,180 @@ export const SimplePanel: React.FC<Props> = ({
   // ======================================
   useEffect(() => {
     const group = kmzPreviewRef.current;
+    const map = mapRef.current;
+    if (!group || !map) { return; }
+    const settings = definirConfiguracaoCamadas(options.kmzLayerSettings);
+    const usedIds = new Set((options.links ?? []).map((link) => link.routeId));
+    const popIds = new Set((options.pops ?? []).map(pop => pop.id));
+    // Calcula as caixas geográficas uma vez. Ao mover o mapa filtra sem modificar os dados salvos.
+    const routes = (options.importedRoutes ?? [])
+      .filter(route => !usedIds.has(route.id))
+      .map(route => ({ route, segments: leafletRouteSegments(route) }))
+      .map(item => ({ ...item, bbox: L.latLngBounds(item.segments.flat()) }));
+
+    const renderPreview = () => {
+      group.clearLayers();
+      if (!(options.showKmzPreview ?? false)) { return; }
+      const bounds = map.getBounds();
+      const zoom = map.getZoom();
+      let drawn = 0;
+      for (const { route, segments, bbox } of routes) {
+        if (drawn >= 500) { break; } // Evita excesso de objetos SVG simultâneos.
+        if (!bbox.isValid() || !bounds.intersects(bbox) || !camadaVisivel(route, settings, zoom)) { continue; }
+        const polyline = L.polyline(segments, {
+          color: '#59bfe8', weight: 3, opacity: 0.6,
+          dashArray: '6 7', interactive: true,
+        }).addTo(group);
+        const tooltip = document.createElement('span');
+        const meta = informacaoKmz(route);
+        tooltip.textContent = `KMZ: ${route.name} · ${meta.project} (${meta.category})`;
+        polyline.bindTooltip(tooltip, { sticky: true });
+        drawn++;
+      }
+      let pointCount = 0;
+      for (const waypoint of options.importedWaypoints ?? []) {
+        if (pointCount >= 300) { break; }
+        if (waypoint.linkedPopId && popIds.has(waypoint.linkedPopId)) { continue; }
+        if (!bounds.contains(waypoint.position) || !camadaVisivel(waypoint, settings, zoom)) { continue; }
+        const marker = L.circleMarker(waypoint.position, {
+          color: '#86eaff', fillColor: '#132c46', weight: 2,
+          radius: 5, fillOpacity: 0.8, bubblingMouseEvents: false,
+        }).addTo(group);
+        const label = document.createElement('span');
+        label.textContent = `KMZ: ${waypoint.name} (referência)`;
+        marker.bindTooltip(label);
+        pointCount++;
+      }
+    };
+    renderPreview();
+    map.on('moveend zoomend', renderPreview);
+    return () => { map.off('moveend zoomend', renderPreview); group.clearLayers(); };
+  }, [options.importedRoutes, options.importedWaypoints, options.pops, options.links,
+      options.showKmzPreview, options.kmzLayerSettings]);
+
+  // ======================================
+  // v1.2 — GEOJSON EXTERNO (SEM SALVAR MILHARES DE PONTOS NO DASHBOARD)
+  // ======================================
+  useEffect(() => {
+    const rawUrl = (options.externalGeojsonUrl ?? '').trim();
+    setSelectedExternalId(null);
+    if (!rawUrl) {
+      setExternalIndex([]);
+      setExternalProjects([]);
+      setExternalStatus('Não configurado');
+      return;
+    }
+    const abort = new AbortController();
+    setExternalStatus('Carregando...');
+    const load = async () => {
+      try {
+        const url = new URL(rawUrl, window.location.origin);
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          throw new Error('A URL precisa utilizar HTTP ou HTTPS.');
+        }
+        const response = await fetch(url.href, { signal: abort.signal, credentials: 'same-origin' });
+        if (!response.ok) { throw new Error(`HTTP ${response.status} (${url.pathname})`); }
+        const raw = await response.text();
+        if (raw.length > 16 * 1024 * 1024) { throw new Error('GeoJSON maior que 16 MB. Divida por projeto.'); }
+        const geojson: unknown = JSON.parse(raw);
+        if (!geojson || typeof geojson !== 'object' ||
+            (geojson as GeoJSONDaRede).type !== 'FeatureCollection' ||
+            !Array.isArray((geojson as GeoJSONDaRede).features)) {
+          throw new Error('GeoJSON inválido: esperado FeatureCollection.');
+        }
+        if ((geojson as GeoJSONDaRede).features.length > 40000) {
+          throw new Error('GeoJSON tem mais de 40.000 geometrias; divida por projeto.');
+        }
+        const index = criarIndiceCamadas(geojson as GeoJSONDaRede);
+        // Prioriza POPs de referência antes do teto de geometrias por viewport.
+        // Não os transforma em POPs de monitoramento.
+        const priority = (item: FeatureIndexada) =>
+          item.ePop ? -1 :
+          item.feature.geometry?.type === 'Point' ? 3 :
+          item.categoria === 'backbone' ? 0 : item.categoria === 'ftth' ? 1 : 2;
+        index.sort((a, b) => priority(a) - priority(b));
+        if (abort.signal.aborted) { return; }
+        setExternalIndex(index);
+        setExternalProjects([...new Set(index.map(item => item.projeto))].sort((a,b) => a.localeCompare(b, 'pt-BR')));
+        setExternalStatus(`${index.length.toLocaleString('pt-BR')} geometrias disponíveis; desenho limitado pela área, zoom e camadas.`);
+      } catch (error) {
+        if (abort.signal.aborted) { return; }
+        setExternalIndex([]);
+        setExternalProjects([]);
+        setExternalStatus(`Erro: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    void load();
+    return () => abort.abort();
+  }, [options.externalGeojsonUrl]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const group = externalGeojsonRef.current;
+    if (!map || !group) { return; }
+    const settings = definirConfiguracaoCamadas(options.kmzLayerSettings);
+    const renderer = L.canvas({ padding: 0.25 });
+    const updateExternal = () => {
+      group.clearLayers();
+      if (!(options.showExternalGeojson ?? options.showKmzPreview ?? false) || externalIndex.length === 0) { return; }
+      const b = map.getBounds();
+      const candidates = filtrarCamadas(externalIndex, {
+        bbox: [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()],
+        zoom: map.getZoom(),
+        projetos: settings.project ? new Set([settings.project]) : undefined,
+        backbone: settings.backbone,
+        ftth: settings.ftth,
+        outros: settings.outros,
+        zoomMinimoFtth: settings.minZoomFtth,
+        maximo: 850, // Limite de elementos por tela; não descarta dados do arquivo.
+        pontos: settings.points,
+      });
+      let rendered = 0;
+      for (const item of candidates) {
+        if (!settings.points && item.feature.geometry?.type === 'Point') { continue; }
+        const layer = criarCamadaGeoJson(item, renderer);
+        if (layer) {
+          // Somente linhas podem ser vinculadas a enlaces; pontos seguem a gestão de POPs.
+          if (segmentosDeFibraGeoJson(item).length && layer instanceof L.Polyline) {
+            const baseWeight = Number(layer.options.weight ?? 3);
+            const baseOpacity = Number(layer.options.opacity ?? 0.8);
+            layer.on('mouseover', () => layer.setStyle({ weight: baseWeight + 3, opacity: 1 }));
+            layer.on('mouseout', () => layer.setStyle({ weight: baseWeight, opacity: baseOpacity }));
+            layer.on('click', () => {
+              if (adding || creatingLink) { return; }
+              setSelectedExternalId(item.id);
+              setExternalMessage('');
+              setSelectedId(null);
+              setSelectedLinkId(null);
+              setLayerViewerOpen(false);
+              setKmzManagerOpen(false);
+            });
+          }
+          layer.addTo(group);
+          rendered++;
+        }
+        if (rendered >= 650) { break; }
+      }
+    };
+    updateExternal();
+    map.on('moveend zoomend', updateExternal);
+    return () => { map.off('moveend zoomend', updateExternal); group.clearLayers(); };
+  }, [externalIndex, options.showExternalGeojson, options.showKmzPreview, options.kmzLayerSettings, adding, creatingLink]);
+
+  // Camada de seleção separada: não recria as 650 rotas ao clicar em uma fibra.
+  useEffect(() => {
+    const group = externalHighlightRef.current;
     if (!group) { return; }
     group.clearLayers();
-    if (!(options.showKmzPreview ?? false)) { return; }
-    const usedIds = new Set((options.links ?? []).map((link) => link.routeId));
-    for (const route of options.importedRoutes ?? []) {
-      if (usedIds.has(route.id)) { continue; }
-      const polyline = L.polyline(leafletRouteSegments(route), {
-        color: '#59bfe8', weight: 3, opacity: 0.6,
-        dashArray: '6 7', interactive: true,
-      }).addTo(group);
-      const tooltip = document.createElement('span');
-      tooltip.textContent = `KMZ: ${route.name} — não vinculada`;
-      polyline.bindTooltip(tooltip, { sticky: true });
+    const item = geojsonById.get(selectedExternalId ?? '');
+    if (!item || !mapRef.current || !(options.showExternalGeojson ?? options.showKmzPreview ?? false)) { return; }
+    const parts = segmentosDeFibraGeoJson(item);
+    if (parts.length > 0) {
+      L.polyline(parts, { color: '#ffe08a', weight: 7, opacity: 0.98,
+        interactive: false, bubblingMouseEvents: false }).addTo(group);
     }
-    for (const waypoint of options.importedWaypoints ?? []) {
-      if (waypoint.linkedPopId && (options.pops ?? []).some((pop) => pop.id === waypoint.linkedPopId)) {
-        continue; // já aparece como marcador de POP monitorável
-      }
-      const marker = L.circleMarker(waypoint.position, {
-        color: '#86eaff', fillColor: '#132c46', weight: 2,
-        radius: 5, fillOpacity: 0.8, bubblingMouseEvents: false,
-      }).addTo(group);
-      const label = document.createElement('span');
-      label.textContent = `KMZ: ${waypoint.name} (referência)`;
-      marker.bindTooltip(label);
-    }
-  }, [options.importedRoutes, options.importedWaypoints, options.pops, options.links, options.showKmzPreview]);
+    return () => { group.clearLayers(); };
+  }, [selectedExternalId, geojsonById, options.showExternalGeojson, options.showKmzPreview]);
 
   // ======================================
   // 4. DESENHAR ENLACES + STATUS
@@ -663,7 +1099,15 @@ export const SimplePanel: React.FC<Props> = ({
       const from = L.latLng(origin.latitude, origin.longitude);
       const to = L.latLng(destination.latitude, destination.longitude);
       const assignedRoute = (options.importedRoutes ?? []).find((route) => route.id === link.routeId);
-      const segments: L.LatLng[][] = assignedRoute ? leafletRouteSegments(assignedRoute) : [[from, to]];
+      const externalRoute = link.externalGeojsonRoute;
+      const externalSegments: L.LatLng[][] = externalRoute &&
+        externalRoute.url === (options.externalGeojsonUrl ?? '').trim()
+        ? externalRoute.featureIds.flatMap(id => {
+            const item = geojsonById.get(id);
+            return item ? segmentosDeFibraGeoJson(item) : [];
+          }) : [];
+      const segments: L.LatLng[][] = externalSegments.length > 0 ? externalSegments :
+        assignedRoute ? leafletRouteSegments(assignedRoute) : [[from, to]];
       const points: L.LatLng[][] = segments;
       const report = linkHealthReport(link.alertRule, link.monitoringFields ?? [], queryItems);
       const state = report.state;
@@ -703,7 +1147,7 @@ export const SimplePanel: React.FC<Props> = ({
       const reasons = state === 'down' && report.downReason
         ? [report.downReason.fieldName]
         : state === 'warning' ? report.warningReasons.map((reason) => reason.fieldName) : [];
-      label.textContent = `${link.name}${assignedRoute ? ` | KMZ: ${assignedRoute.name}` : ''}${stateLabel ? ` — ${stateLabel}` : ''}${reasons.length ? ` (${reasons.join(', ')})` : ''}`;
+      label.textContent = `${link.name}${externalSegments.length ? ' | GeoJSON externo' : assignedRoute ? ` | KMZ: ${assignedRoute.name}` : ''}${stateLabel ? ` — ${stateLabel}` : ''}${reasons.length ? ` (${reasons.join(', ')})` : ''}`;
       const hitLine = L.polyline(points, {
         color: '#fff',
         weight: Math.max(14, weight + 10),
@@ -714,11 +1158,8 @@ export const SimplePanel: React.FC<Props> = ({
       hitLine.bindTooltip(label, { sticky: true });
       hitLine.on('click', () => {
         if (adding || creatingLink) { return; }
-        setSelectedLinkId(link.id);
-        setEditLinkName(link.name);
-        setConfirmDeleteLink(false);
-        setSelectedId(null);
-        setConfirmDelete(false);
+        setNavigationHistory([]);
+        navigateToLink(link.id, false);
       });
     }
 
@@ -730,7 +1171,7 @@ export const SimplePanel: React.FC<Props> = ({
     };
     map.on('moveend zoomend resize', updateXPositions);
     return () => { map.off('moveend zoomend resize', updateXPositions); };
-  }, [options.pops, options.links, options.importedRoutes, adding, creatingLink, queryItems]);
+  }, [options.pops, options.links, options.importedRoutes, options.externalGeojsonUrl, geojsonById, adding, creatingLink, queryItems]);
 
   // Criação compartilhada entre cliques no mapa e seleção por listas.
   const createLinkBetween = (sourcePopId: string, targetPopId: string, desiredRouteId = ''): boolean => {
@@ -825,10 +1266,8 @@ export const SimplePanel: React.FC<Props> = ({
         }
 
         // Clicar no POP abre edição (modo edição) ou indicadores (modo normal).
-        setSelectedId(pop.id);
-        setEditName(pop.name);
-        setConfirmDelete(false);
-        setSelectedLinkId(null);
+        setNavigationHistory([]);
+        navigateToPop(pop.id, false);
       });
 
       // ==================================
@@ -1030,6 +1469,7 @@ export const SimplePanel: React.FC<Props> = ({
 
     setSelectedId(null);
     setConfirmDelete(false);
+    setNavigationHistory([]);
   };
 
   // ======================================
@@ -1051,6 +1491,7 @@ export const SimplePanel: React.FC<Props> = ({
       setLinkRouteId('');
       setKmzManagerOpen(false);
     }
+    setNavigationHistory([]);
 
     setEditMode(!editMode);
   };
@@ -1157,15 +1598,34 @@ export const SimplePanel: React.FC<Props> = ({
               '0 4px 16px rgba(0, 0, 0, 0.5)',
           }}
         >
-          <Button
+          <Button size="sm" variant={viewMode === 'noc' ? 'primary' : 'secondary'} disabled={editMode}
+            onClick={() => {
+              const next = viewMode === 'noc' ? 'projeto' : 'noc';
+              setViewMode(next);
+              setLayerViewerOpen(next === 'projeto' && externalIndex.length > 0);
+            }}>
+            {viewMode === 'noc' ? 'NOC' : 'Projeto'}
+          </Button>
+
+          <Button size="sm" variant="secondary" onClick={() => setBaseMap(current => current === 'osm' ? 'satelite' : 'osm')}>
+            {baseMap === 'osm' ? 'Satélite' : 'Ruas'}
+          </Button>
+
+          {viewMode === 'projeto' && <Button
             size="sm"
             variant="secondary"
             onClick={salvarPosicaoAtual}
           >
             Usar posição atual
-          </Button>
+          </Button>}
 
-          <Button
+          {viewMode === 'projeto' && !!externalIndex.length && <Button size="sm"
+            variant={layerViewerOpen ? 'primary' : 'secondary'}
+            onClick={() => setLayerViewerOpen((open) => !open)}>
+            Camadas
+          </Button>}
+
+          {viewMode === 'projeto' && <Button
             size="sm"
             variant={editMode ? 'primary' : 'secondary'}
             onClick={alternarEdicao}
@@ -1173,7 +1633,7 @@ export const SimplePanel: React.FC<Props> = ({
             {editMode
               ? 'Concluir edição'
               : 'Editar POPs'}
-          </Button>
+          </Button>}
 
           {editMode && (
             <Button
@@ -1236,6 +1696,30 @@ export const SimplePanel: React.FC<Props> = ({
           )}
         </div>
 
+        {viewMode === 'noc' && !editMode && !layerViewerOpen && (
+          <OperationSidebar
+            pops={pops}
+            links={links}
+            items={queryItems}
+            geojsonCount={externalIndex.length}
+            onSelectPop={id => { setNavigationHistory([]); navigateToPop(id, false); locatePopOnMap(id); }}
+            onSelectLink={id => { setNavigationHistory([]); navigateToLink(id, false); locateLinkOnMap(id); }}
+            onOpenLayers={() => setLayerViewerOpen(true)}
+            layersEnabled={externalIndex.length > 0}
+          />
+        )}
+
+        {layerViewerOpen && externalIndex.length > 0 && (
+          <LayerQuickControls
+            settings={options.kmzLayerSettings}
+            projects={externalProjects}
+            enabled={options.showExternalGeojson ?? options.showKmzPreview ?? false}
+            onEnabledChange={enabled => changeCurrentOptions({ ...optionsRef.current, showExternalGeojson: enabled })}
+            onSettingsChange={settings => changeCurrentOptions({ ...optionsRef.current, kmzLayerSettings: settings })}
+            onClose={() => setLayerViewerOpen(false)}
+          />
+        )}
+
         {editMode && kmzManagerOpen && (
           <div className="teif-monitor-editor" style={editorCardStyle}>
             <KmzManager
@@ -1244,6 +1728,28 @@ export const SimplePanel: React.FC<Props> = ({
               pops={pops}
               links={links}
               showPreview={options.showKmzPreview ?? false}
+              layerSettings={options.kmzLayerSettings}
+              externalProjects={externalProjects}
+              externalStatus={externalStatus}
+              externalCount={externalIndex.length}
+              externalIndex={candidatosGeojson(externalIndex)}
+              externalSourceUrl={(options.externalGeojsonUrl ?? '').trim()}
+              externalVisible={options.showExternalGeojson ?? options.showKmzPreview ?? false}
+              onExternalVisibleChange={enabled => changeCurrentOptions({ ...optionsRef.current, showExternalGeojson: enabled })}
+              onLocateExternal={locateExternalCandidate}
+              onCreateExternalPop={createExternalPop}
+              onZoomToExternal={() => {
+                const map = mapRef.current;
+                if (!map) { return; }
+                const project = definirConfiguracaoCamadas(optionsRef.current.kmzLayerSettings).project;
+                const bounds = L.latLngBounds([]);
+                for (const item of externalIndex) {
+                  if (project && item.projeto !== project) { continue; }
+                  bounds.extend([[item.bbox[1], item.bbox[0]], [item.bbox[3], item.bbox[2]]]);
+                }
+                if (bounds.isValid()) { map.fitBounds(bounds.pad(0.06), { maxZoom: 14 }); }
+              }}
+              onLayerSettingsChange={(settings) => changeCurrentOptions({ ...optionsRef.current, kmzLayerSettings: settings })}
               loading={kmzLoading}
               message={kmzMessage}
               onTogglePreview={(show) => changeCurrentOptions({ ...optionsRef.current, showKmzPreview: show })}
@@ -1259,6 +1765,80 @@ export const SimplePanel: React.FC<Props> = ({
               onLocateRoute={(route) => zoomToRoute(mapRef.current, route)}
               onRemoveWaypoints={deleteImportedWaypoints}
             />
+          </div>
+        )}
+
+        {/* INSPECTOR DE FIBRA DO GEOJSON EXTERNO — CLIQUE DIRETO NO CABO */}
+        {selectedExternal && !creatingLink && !selectedLink && !selectedPop && (
+          <div className="teif-monitor-editor" style={editorCardStyle}>
+            <div style={{ display: 'flex', gap: 7, justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>Fibra selecionada</strong>
+              <Button size="sm" variant="secondary" onClick={() => setSelectedExternalId(null)}>Fechar</Button>
+            </div>
+            <strong style={{ fontSize: 13, overflowWrap: 'anywhere' }}>
+              {String(selectedExternal.feature.properties?.name ?? 'Trecho sem nome')}
+            </strong>
+            <small>Projeto: {selectedExternal.projeto} · Categoria: {selectedExternal.categoria}</small>
+            {!!selectedExternal.feature.properties?.pasta && (
+              <small style={{ overflowWrap: 'anywhere' }}>Pasta: {String(selectedExternal.feature.properties.pasta)}</small>
+            )}
+            {!!selectedExternal.feature.properties?.descricao && (
+              <details>
+                <summary style={{ cursor: 'pointer' }}>Descrição original do KMZ</summary>
+                <small style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                  {String(selectedExternal.feature.properties.descricao).slice(0, 3000)}
+                </small>
+              </details>
+            )}
+            {externalLinkedTo.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <small>Enlace(s) associado(s):</small>
+                {externalLinkedTo.map(link => (
+                  <Button key={link.id} size="sm" variant="secondary"
+                    onClick={() => navigateToLink(link.id, false)}>{link.name}</Button>
+                ))}
+              </div>
+            )}
+            {editMode ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, borderTop: '1px solid #405065', paddingTop: 8 }}>
+                <strong style={{ fontSize: 12 }}>Adicionar monitoramento</strong>
+                {pops.length >= 2 ? (
+                  <>
+                    <small>Para criar um enlace, selecione os dois POPs:</small>
+                    <select style={inputStyle} value={externalSourcePopId}
+                      onChange={event => { setExternalSourcePopId(event.target.value); setExternalTargetPopId(''); }}>
+                      <option value="">Origem...</option>
+                      {pops.map(pop => <option key={pop.id} value={pop.id}>{pop.name}</option>)}
+                    </select>
+                    <select style={inputStyle} value={externalTargetPopId}
+                      onChange={event => setExternalTargetPopId(event.target.value)}>
+                      <option value="">Destino...</option>
+                      {pops.filter(pop => pop.id !== externalSourcePopId).map(pop =>
+                        <option key={pop.id} value={pop.id}>{pop.name}</option>)}
+                    </select>
+                    <Button size="sm" variant="primary"
+                      disabled={!externalSourcePopId || !externalTargetPopId || externalSourcePopId === externalTargetPopId}
+                      onClick={createLinkWithExternalRoute}>Criar enlace com esta fibra</Button>
+                  </>
+                ) : <small>Cadastre pelo menos dois POPs para criar um enlace.</small>}
+                {links.length > 0 && (
+                  <>
+                    <small>Ou acrescente este trecho a um enlace já cadastrado:</small>
+                    <select style={inputStyle} value={externalExistingLinkId}
+                      onChange={event => setExternalExistingLinkId(event.target.value)}>
+                      <option value="">Escolha um enlace...</option>
+                      {links.map(link => <option key={link.id} value={link.id}>{link.name}</option>)}
+                    </select>
+                    <Button size="sm" variant="secondary" disabled={!externalExistingLinkId}
+                      onClick={attachExternalRoute}>Adicionar trecho ao enlace</Button>
+                  </>
+                )}
+                <small>Apenas a referência geográfica é salva. Configure RX, TX e thresholds no editor do enlace.</small>
+                {!!externalMessage && <small style={{ color: '#ffcf80' }}>{externalMessage}</small>}
+              </div>
+            ) : (
+              <small>Para configurar monitoramento, clique em Editar POPs e selecione a fibra novamente.</small>
+            )}
           </div>
         )}
 
@@ -1355,7 +1935,16 @@ export const SimplePanel: React.FC<Props> = ({
         {/* EDIÇÃO DE POP */}
         {selectedPop && (
           <div className="teif-monitor-editor" style={editorCardStyle}>
-            <strong>{editMode ? 'Editar POP' : selectedPop.name}</strong>
+            <PopupHeader
+              title={editMode ? 'Editar POP' : selectedPop.name}
+              backTo={previousViewName}
+              onBack={goBackInNavigation}
+              onClose={() => {
+                setSelectedId(null);
+                setConfirmDelete(false);
+                setNavigationHistory([]);
+              }}
+            />
 
             {editMode ? (
               <>
@@ -1485,7 +2074,9 @@ export const SimplePanel: React.FC<Props> = ({
               </>
             ) : (
               <>
-                <MonitorFieldsReadout fields={selectedPop.monitoringFields ?? []} items={queryItems} />
+                {(selectedPop.monitoringFields?.length ?? 0) > 0 && (
+                  <MonitorFieldsReadout fields={selectedPop.monitoringFields ?? []} items={queryItems} />
+                )}
                 {selectedPopReport && (selectedPop.alertRule || (selectedPop.monitoringFields ?? []).some((field) => field.warningRule)) && (
                   <>
                     <small style={{ color: selectedPopReport.state === 'down' ? '#ff6675' : selectedPopReport.state === 'warning' ? '#facc15' : '#b5e4ff', fontWeight: 700 }}>
@@ -1509,16 +2100,28 @@ export const SimplePanel: React.FC<Props> = ({
               </>
             )}
 
-            <div style={{ borderTop: '1px solid #405065', paddingTop: 9, display: 'flex', flexDirection: 'column', gap: 7 }}>
-              <strong>Rotas conectadas ao POP</strong>
-              {(() => {
-                const routes = routesConnectedToPop(selectedPop.id, importedRoutes, links);
-                const connectedLinks = linksConnectedToPop(selectedPop.id, links);
-                return (
-                  <>
-                    <small>Saídas, chegadas e rotas utilizadas pelos enlaces cadastrados.</small>
-                    {routes.length === 0 ? <small>Nenhuma rota KMZ associada a este POP.</small> : (
-                      routes.map((route) => {
+            {(() => {
+              const routes = routesConnectedToPop(selectedPop.id, importedRoutes, links);
+              const connectedLinks = linksConnectedToPop(selectedPop.id, links);
+              const linksKey = `pop:${selectedPop.id}:links`;
+              const routesKey = `pop:${selectedPop.id}:routes`;
+              return (
+                <>
+                  {connectedLinks.length > 0 && (
+                    <PopupSection title="Enlaces" count={connectedLinks.length}
+                      expanded={popupSectionOpen(linksKey)} onToggle={() => togglePopupSection(linksKey)}>
+                      {connectedLinks.map((link) => (
+                        <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                          <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{link.name}</span>
+                          <Button size="sm" variant="secondary" onClick={() => navigateToLink(link.id)}>Abrir</Button>
+                        </div>
+                      ))}
+                    </PopupSection>
+                  )}
+                  {routes.length > 0 && (
+                    <PopupSection title="Rotas KMZ" count={routes.length}
+                      expanded={popupSectionOpen(routesKey)} onToggle={() => togglePopupSection(routesKey)}>
+                      {routes.map((route) => {
                         const direction = route.sourcePopId === selectedPop.id && route.targetPopId === selectedPop.id
                           ? 'Origem e destino' : route.sourcePopId === selectedPop.id ? 'Saída'
                           : route.targetPopId === selectedPop.id ? 'Chegada' : 'Via enlace monitorado';
@@ -1530,41 +2133,29 @@ export const SimplePanel: React.FC<Props> = ({
                             <Button size="sm" variant="secondary" onClick={() => zoomToRoute(mapRef.current, route)}>Ver</Button>
                           </div>
                         );
-                      })
-                    )}
-                    <strong style={{ fontSize: 12 }}>Enlaces deste POP ({connectedLinks.length})</strong>
-                    {connectedLinks.length === 0 ? <small>Nenhum enlace cadastrado.</small> : connectedLinks.map((link) => (
-                      <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                        <span style={{ flex: 1, overflowWrap: 'anywhere' }}>{link.name}</span>
-                        <Button size="sm" variant="secondary" onClick={() => {
-                          setSelectedLinkId(link.id);
-                          setEditLinkName(link.name);
-                          setSelectedId(null);
-                        }}>Abrir</Button>
-                      </div>
-                    ))}
-                  </>
-                );
-              })()}
-            </div>
+                      })}
+                    </PopupSection>
+                  )}
+                </>
+              );
+            })()}
 
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                setSelectedId(null);
-                setConfirmDelete(false);
-              }}
-            >
-              Fechar
-            </Button>
           </div>
         )}
 
         {/* EDIÇÃO E VISUALIZAÇÃO DOS ENLACES */}
         {selectedLink && (
           <div className="teif-monitor-editor" style={editorCardStyle}>
-            <strong>{editMode ? 'Editar enlace' : selectedLink.name}</strong>
+            <PopupHeader
+              title={editMode ? 'Editar enlace' : selectedLink.name}
+              backTo={previousViewName}
+              onBack={goBackInNavigation}
+              onClose={() => {
+                setSelectedLinkId(null);
+                setConfirmDeleteLink(false);
+                setNavigationHistory([]);
+              }}
+            />
             {editMode ? (
               <>
                 <small>Nome do enlace</small>
@@ -1603,7 +2194,7 @@ export const SimplePanel: React.FC<Props> = ({
                   <select
                     style={inputStyle}
                     value={importedRoutes.some((route) => route.id === selectedLink.routeId) ? selectedLink.routeId : ''}
-                    onChange={(event) => updateLinkProperties(selectedLink.id, { routeId: event.target.value || undefined })}
+                    onChange={(event) => updateLinkProperties(selectedLink.id, { routeId: event.target.value || undefined, externalGeojsonRoute: undefined })}
                   >
                     <option value="">Linha reta entre POPs (padrão)</option>
                     {importedRoutes.map((route) => (
@@ -1624,6 +2215,17 @@ export const SimplePanel: React.FC<Props> = ({
                     >
                       Centralizar trajeto no mapa
                     </Button>
+                  )}
+                  {selectedLink.externalGeojsonRoute && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid #405065', borderRadius: 5, padding: 8 }}>
+                      <small>GeoJSON externo: {selectedLink.externalGeojsonRoute.featureIds.length} trecho(s) associado(s).</small>
+                      {selectedLink.externalGeojsonRoute.url !== externalSourceUrl &&
+                        <small style={{ color: '#ffb45c' }}>A URL mudou. Rota externa indisponível; ajuste a fonte ou remova o vínculo.</small>}
+                      <Button size="sm" variant="secondary"
+                        onClick={() => updateLinkProperties(selectedLink.id, { externalGeojsonRoute: undefined })}>
+                        Desvincular trajeto GeoJSON (mantém o enlace e as métricas)
+                      </Button>
+                    </div>
                   )}
                   <small>Os POPs continuam em suas posições originais. A geometria importada deve representar o cabo físico correspondente.</small>
                 </div>
@@ -1717,6 +2319,7 @@ export const SimplePanel: React.FC<Props> = ({
                       changeCurrentOptions({ ...current, links: (current.links ?? []).filter((item) => item.id !== selectedLink.id) });
                       setSelectedLinkId(null);
                       setConfirmDeleteLink(false);
+                      setNavigationHistory([]);
                     }}>Confirmar exclusão</Button>
                     <Button size="sm" variant="secondary" onClick={() => setConfirmDeleteLink(false)}>Cancelar exclusão</Button>
                   </>
@@ -1747,9 +2350,23 @@ export const SimplePanel: React.FC<Props> = ({
                 )}
               </>
             )}
-            <Button size="sm" variant="secondary" onClick={() => { setSelectedLinkId(null); setConfirmDeleteLink(false); }}>
-              Fechar
-            </Button>
+            {!editMode && (
+              <PopupSection title="POPs conectados" count={2}
+                expanded={popupSectionOpen(`link:${selectedLink.id}:pops`)}
+                onToggle={() => togglePopupSection(`link:${selectedLink.id}:pops`)}>
+                {([
+                  { id: selectedLink.sourcePopId, label: 'Origem' },
+                  { id: selectedLink.targetPopId, label: 'Destino' },
+                ]).map((endpoint) => {
+                  const pop = pops.find((item) => item.id === endpoint.id);
+                  return pop ? (
+                    <Button key={endpoint.label} size="sm" variant="secondary" onClick={() => navigateToPop(pop.id)}>
+                      {endpoint.label}: {pop.name} →
+                    </Button>
+                  ) : null;
+                })}
+              </PopupSection>
+            )}
           </div>
         )}
 
