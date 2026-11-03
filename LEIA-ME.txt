@@ -1,0 +1,28 @@
+TEIF BACKBONE PANEL v1.2 — AJUSTE DE CONTRASTE DO GEOJSON EXTERNO
+
+O arquivo src/geo/renderer.ts altera somente as cores e a largura das geometrias geográficas do GeoJSON externo. Não altera monitoramento Zabbix, nem estados UP/ATENÇÃO/DOWN, nem POPs já cadastrados.
+
+NOVAS CORES:
+- Backbone: #6129B6 (violeta escuro, espessura 4px)
+- FTTH: #B45309 (laranja queimado, espessura 2.7px)
+- Outros: #667085 (ardósia, tracejado e discreto)
+- Referências POP e HUB: cores originais mantidas.
+
+INSTALAR:
+1. Coloque o ZIP na raiz do projeto ~/projetos/teif/teif-backbonemap-panel
+2. Execute:
+   cp src/geo/renderer.ts ~/teif-renderer-pre-contraste.ts
+   unzip -o TEIF-v1.2-contraste-rotas.zip -d .
+   npm run typecheck
+   npm run build
+   mkdir -p dist/maps
+   cp maps/teif-projeto-completo.geojson dist/maps/
+3. Atualize o Grafana de testes com Ctrl+Shift+R.
+
+ROLLBACK:
+   cp ~/teif-renderer-pre-contraste.ts src/geo/renderer.ts
+   npm run build
+   mkdir -p dist/maps
+   cp maps/teif-projeto-completo.geojson dist/maps/
+
+IMPORTANTE: Não faça deploy no Grafana operacional antes de validar a aparência no ambiente de testes.

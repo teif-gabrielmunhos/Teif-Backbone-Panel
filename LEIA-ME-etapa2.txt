@@ -1,0 +1,80 @@
+TEIF BACKBONE PANEL v1.2 — ETAPA 2
+Identificação de candidatos a POP e filtros de camadas no modo visualização
+Data: 28/10/2026
+
+O QUE MUDA
+- GeoJSON externo agora distingue marcadores POP, HUB e infraestrutura.
+- 9 referências marcadas POP e 239 referências marcadas HUB no GeoJSON atual.
+- Em Editar POPs > Rotas KMZ > Pontos GeoJSON, pesquise, localize e confirme um candidato como POP monitorável, individualmente.
+- Guarda no POP o ID da geometria de origem e a URL do GeoJSON.
+- Bloqueia duplicação por mesma referência e por distância de até 10 metros de outro POP.
+- Novo botão 'Camadas' na barra do mapa, disponível fora do modo de edição.
+- Controle separado para mostrar/ocultar o GeoJSON externo; no primeiro acesso preserva a configuração antiga.
+- POPs marcados recebem prioridade na renderização, antes do teto de 650 geometrias externas por tela.
+- Continua sem associar interfaces ou Zabbix automaticamente. HUBs não são tratados como POP nem OLT sem confirmação do operador.
+
+O QUE NÃO MUDA
+- POPs e enlaces monitorados existentes, RX, throughput, alarmes e navegação entre POPs/enlaces.
+- Formato do KMZ, arquivo GeoJSON externo e caminho público já configurado.
+- Limite de 200 rotas no importador KMZ legado; o projeto grande permanece como GeoJSON externo.
+- O Grafana operacional NÃO deve ser atualizado nessa etapa.
+
+INSTALAÇÃO NO WSL (SOMENTE GRAFANA DE DESENVOLVIMENTO)
+1) Faça backup completo do estado atual ANTES de sobrescrever:
+
+cd ~/projetos/teif/teif-backbonemap-panel
+git status -sb
+tar -czf "$HOME/teif-v12-etapa1-antes-etapa2.tar.gz" src package.json
+
+2) Coloque o pacote na raiz do plugin (pode usar explorer.exe . no WSL).
+   Use um dos formatos:
+
+unzip -l teif_v12_etapa2.zip
+unzip -o teif_v12_etapa2.zip -d .
+
+OU: tar -xzf teif_v12_etapa2.tar.gz
+
+3) Verifique que os novos componentes existem:
+
+ls -l src/components/ExternalPointsManager.tsx src/components/LayerQuickControls.tsx
+
+4) Compile:
+
+npm run typecheck
+npm run build
+
+5) O webpack pode limpar dist/maps; mantenha o GeoJSON disponível:
+
+mkdir -p dist/maps
+cp maps/teif-projeto-completo.geojson dist/maps/
+
+Se o ambiente Docker já estiver rodando, atualize o navegador com Ctrl+Shift+R.
+Se o plugin não recompilar automaticamente, use npm run dev na máquina WSL.
+
+TESTES FUNCIONAIS
+A) Abra o painel de teste que já usa /public/plugins/teif-backbonemap-panel/maps/teif-projeto-completo.geojson
+B) Fora do editor de POPs, clique em Camadas, altere projeto e FTTH; verifique que o mapa reage.
+C) Em Editar POPs > Rotas KMZ > Pontos GeoJSON, verifique as duas categorias POP (9) e HUB (239).
+D) Pesquise um POP, clique Localizar e veja o mapa aproximar.
+E) Escolha SOMENTE um POP cuja localização você confirme, clique Confirmar como POP.
+F) Confira que o contador POPs aumenta de 0 para 1 e que o novo POP aparece para receber métricas Zabbix.
+G) Clique novamente em Confirmar como POP e confirme que a duplicação é impedida.
+H) Volte aos filtros, desative GeoJSON externo: os POPs monitorados devem continuar visíveis.
+
+RESTRIÇÕES
+- Não insira centenas de POPs sem análise: conversão individual e sem vínculo Zabbix automático.
+- O GeoJSON externo deve permanecer na mesma URL para que a indicação 'já cadastrado' encontre o vínculo anterior.
+- O conjunto com 9.766 geometrias é limitado por viewport e quantidade renderizada; nenhum dado geográfico é apagado.
+
+ROLLBACK
+- Pare o processo de desenvolvimento se houver erros; restaure os arquivos do backup criado acima:
+
+cd ~/projetos/teif/teif-backbonemap-panel
+tar -xzf "$HOME/teif-v12-etapa1-antes-etapa2.tar.gz" -C .
+npm run typecheck && npm run build
+
+VALIDAÇÃO LOCAL REALIZADA NA PREPARAÇÃO
+- Validação de sintaxe de todos os TS/TSX alterados.
+- Compilação do módulo puro de geometrias com TypeScript --strict.
+- Indexação do GeoJSON completo e conferência de 9 POPs e 239 HUBs.
+- NÃO foi possível compilar todo o plugin Grafana/React nesta execução sem suas dependências do WSL.

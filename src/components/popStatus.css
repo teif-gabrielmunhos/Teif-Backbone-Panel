@@ -1,0 +1,49 @@
+/* TEIF Backbone Panel v0.9 — Estados visuais de POPs. Escopo isolado. */
+.teif-backbone-map .teif-pop-marker {
+  background: transparent;
+  border: 0;
+}
+.teif-backbone-map .teif-pop-status-core {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  margin: 2px;
+  border: 2px solid #073344;
+  border-radius: 50%;
+  background: #00ffff;
+  box-shadow: 0 0 10px #00ffff;
+  color: #fff;
+}
+.teif-backbone-map .teif-pop-warning .teif-pop-status-core {
+  background: #facc15;
+  border-color: #665012;
+  box-shadow: 0 0 12px #facc15;
+}
+.teif-backbone-map .teif-pop-down .teif-pop-status-core {
+  background: #a51c29;
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #4d111a, 0 0 10px #ff202f;
+  animation: teif-pop-pulse 1.3s steps(1, end) infinite;
+}
+.teif-backbone-map .teif-pop-status-x {
+  color: #fff;
+  font-family: sans-serif;
+  font-weight: 900;
+  font-size: 14px;
+  line-height: 1;
+}
+.teif-backbone-map .teif-pop-no-data .teif-pop-status-core {
+  background: #9299a6;
+  border: 2px dashed #dee3eb;
+  box-shadow: 0 0 5px #9299a6;
+}
+@keyframes teif-pop-pulse {
+  0%, 49.99% { background: #a51c29; }
+  50%, 100% { background: #ff202f; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .teif-backbone-map .teif-pop-down .teif-pop-status-core { animation: none; background: #ff202f; }
+}

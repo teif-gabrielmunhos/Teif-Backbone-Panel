@@ -1,0 +1,6 @@
+/* Fallback sem chave: escurece SOMENTE os tiles OSM, nunca a fibra ou os POPs. */
+.teif-dark-fallback .leaflet-tile-pane {
+  filter: grayscale(1) invert(1) brightness(0.75) contrast(1.24);
+}
+.teif-dark-map { background: #141c29; }
+.teif-editor-tools button { white-space: nowrap; }

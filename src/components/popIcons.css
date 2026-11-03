@@ -1,0 +1,53 @@
+/* Marcadores de equipamentos: desenho fixo + estado operacional independente. */
+.teif-pop-device-marker {
+  background: transparent !important;
+  border: 0 !important;
+}
+.teif-pop-device-body {
+  position: absolute;
+  left: 2px;
+  top: 1px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #6c99b5;
+  border-radius: 10px;
+  background: #132237;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .65);
+  box-sizing: border-box;
+}
+.teif-pop-device-body svg { width: 33px; height: 33px; display: block; }
+.teif-pop-device-status {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 17px;
+  height: 17px;
+  border: 2px solid #101a2b;
+  border-radius: 50%;
+  box-sizing: border-box;
+  background: #94a3b8;
+  box-shadow: 0 1px 6px rgba(0,0,0,.5);
+  text-align: center;
+  line-height: 13px;
+  font-size: 14px;
+  font-weight: 900;
+  color: #fff;
+}
+.teif-pop-device-marker.teif-pop-ok .teif-pop-device-status { background: #22c55e; }
+.teif-pop-device-marker.teif-pop-warning .teif-pop-device-status { background: #eab308; }
+.teif-pop-device-marker.teif-pop-down .teif-pop-device-status {
+  background: #ef4444;
+  animation: teif-pop-device-alert 1.2s ease-in-out infinite alternate;
+}
+.teif-pop-device-marker.teif-pop-no-data .teif-pop-device-status,
+.teif-pop-device-marker.teif-pop-normal .teif-pop-device-status { background: #94a3b8; }
+@keyframes teif-pop-device-alert {
+  from { box-shadow: 0 0 2px rgba(239,68,68,.3); }
+  to { box-shadow: 0 0 13px 3px rgba(239,68,68,.9); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .teif-pop-device-marker.teif-pop-down .teif-pop-device-status { animation: none; }
+}

@@ -1,0 +1,64 @@
+TEIF BACKBONE PANEL v1.2 — HOTFIX: CLIQUE E ASSOCIACAO DE FIBRA
+
+MOTIVO
+O GeoJSON externo e' desenhado como camada de referencia. Ate' esta correcao,
+as linhas externas nao' tinham handler de clique para abrir uma selecao e o
+editor de monitoramento so' podia ser aberto para enlaces cadastrados.
+A mudanca de cores por si so' nao causou essa ausencia de associacao.
+
+O QUE MUDA
+1. Passar o mouse sobre fibra do GeoJSON realca temporariamente o traco.
+2. Clicar sobre fibra abre painel "Fibra selecionada" com nome/projeto/pasta.
+3. Clicar fixa destaque amarelo-clarinho, sem alterar cor de UP/DOWN Zabbix.
+4. No modo de edicao: "Criar enlace com esta fibra" pede POP origem e destino.
+5. Ou "Adicionar trecho ao enlace" usa um enlace ja cadastrado: multiplos
+   trechos podem formar um trajeto; o limite de seguranca e' 100 por enlace.
+6. O enlace associado usa o caminho real do GeoJSON em vez de uma linha reta.
+7. O editor existente abre automaticamente, com RX/TX, thresholds e alertas.
+8. No editor, "Desvincular trajeto GeoJSON" mantem enlace e monitoramento.
+9. Geometrias nao' sao copiadas para o dashboard, so' IDs e URL do GeoJSON.
+
+LIMITES IMPORTANTES
+- UM CLIQUE seleciona UM trecho/feature geogra'fica; se um cabo tiver mais de
+  um segmento, selecione cada segmento e use "Adicionar trecho ao enlace".
+- A associacao entre fibra e POPs deve ser verificada pelo operador.
+- O GeoJSON deve continuar acessivel pela URL configurada no editor do Grafana.
+- Se o arquivo for SUBSTITUIDO ou a ordem de features for alterada, os IDs
+  de features gerados por posicao podem mudar. Verifique os vinculos.
+- Os campos do Zabbix dependem das queries configuradas no painel.
+- Estas alteracoes nao' foram compiladas contra dependencias Grafana na maquina
+  de geracao. Validada a sintaxe JS/TS; execute typecheck e build no WSL.
+
+INSTALACAO (somente Grafana de DESENVOLVIMENTO)
+cd ~/projetos/teif/teif-backbonemap-panel
+
+# Faca backup antes, preservando suas modificacoes nao commitadas:
+tar -czf ~/teif-v12-antes-interacao.tar.gz src package.json
+
+# Copie este ZIP para a pasta do projeto, depois:
+unzip -o TEIF-v1.2-fibra-clicavel.zip -d .
+
+npm run typecheck
+npm run build
+
+mkdir -p dist/maps
+cp maps/teif-projeto-completo.geojson dist/maps/
+
+# No navegador, recarregue com Ctrl+Shift+R.
+
+TESTE
+1. Abra o painel Teif Backbone no Grafana de DESENVOLVIMENTO.
+2. Clique sobre uma linha violeta: ela deve ser realcada e abrir detalhes.
+3. Ative "Editar POPs" e selecione a fibra novamente se necessario.
+4. Escolha origem e destino entre seus 9 POPs e "Criar enlace com esta fibra".
+5. O editor do enlace deve abrir, permitindo adicionar campos do Zabbix.
+6. Salve o dashboard e recarregue. O enlace deve continuar seguindo a fibra.
+
+ROLLBACK
+cd ~/projetos/teif/teif-backbonemap-panel
+tar -xzf ~/teif-v12-antes-interacao.tar.gz
+npm run typecheck && npm run build
+mkdir -p dist/maps
+cp maps/teif-projeto-completo.geojson dist/maps/
+
+NAO atualizar Grafana operacional ate validar a interacao e o monitoramento.

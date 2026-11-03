@@ -1,0 +1,34 @@
+/* TEIF Backbone Map v0.7.1 — layout do editor do painel.
+   Escopo restrito para nao afetar o restante do Grafana. */
+.teif-backbone-map .teif-monitor-editor {
+  scrollbar-width: thin;
+  scrollbar-color: #526b87 #182437;
+}
+
+/* Itens do formulario nao podem ser esmagados quando o painel e baixo. */
+.teif-backbone-map .teif-monitor-editor > * {
+  flex-shrink: 0;
+}
+
+.teif-backbone-map .teif-monitor-editor select,
+.teif-backbone-map .teif-monitor-editor input:not([type='range']):not([type='color']):not([type='checkbox']) {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  flex-shrink: 0;
+  line-height: 1.35;
+}
+
+.teif-backbone-map .teif-monitor-editor small,
+.teif-backbone-map .teif-monitor-editor label {
+  line-height: 1.45;
+}
+
+/* O botao de fechar nao some no final de formularios longos. */
+.teif-backbone-map .teif-monitor-editor > button:last-child {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  box-shadow: 0 -9px 12px rgba(18, 26, 40, 0.93);
+}
