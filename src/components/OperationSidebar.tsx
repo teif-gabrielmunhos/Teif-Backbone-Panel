@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { BackbonePop, BackboneLink } from '../types';
 import type { QueryItem, LinkHealthState } from '../monitoring';
-import { linkHealthReport, popHealthReport } from '../monitoring';
+import { linkHealthReport, popEquipmentHealthReport } from '../monitoring';
 import './operationSidebar.css';
 
 type Kind = 'pop' | 'link';
@@ -44,7 +44,7 @@ export const OperationSidebar: React.FC<Props> = ({
   const [search, setSearch] = useState('');
   const entries = useMemo((): Entry[] => {
     const popEntries: Entry[] = pops.map(pop => {
-      const report = popHealthReport(pop.alertRule, pop.monitoringFields ?? [], items);
+      const report = popEquipmentHealthReport(pop, items);
       return {
         id: pop.id, kind: 'pop', name: pop.name, status: report.state,
         reason: report.downReason?.fieldName ?? report.warningReasons.map(r => r.fieldName).join(' · '),
@@ -97,7 +97,7 @@ export const OperationSidebar: React.FC<Props> = ({
         <section className="teif-ops-drawer" aria-label={`Painel de ${drawer}`}>
           <div className="teif-ops-header">
             <div><strong>{drawer === 'alarmes' ? 'Alarmes da rede' : drawer === 'busca' ? 'Pesquisar rede' : 'Visão da rede'}</strong>
-              <small>Teif Backbone Panel · v1.2</small></div>
+              </div>
             <button type="button" onClick={() => setDrawer(null)} title="Fechar painel" aria-label="Fechar painel">×</button>
           </div>
           <div className="teif-ops-scroll">

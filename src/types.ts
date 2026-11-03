@@ -74,9 +74,22 @@ export interface ImportedWaypoint extends KmzFeatureMetadata {
   linkedPopId?: string;
 }
 
+/** Equipamento lógico dentro do POP, sem alterar os campos legados do POP. */
+export interface PopEquipment {
+  id: string;
+  name: string;
+  hostName?: string;
+  monitoringFields?: MonitorField[];
+  alertRule?: PopAlertRule;
+}
+
+export type PopMarkerIcon = 'bolinha' | 'switch' | 'torre' | 'router';
+
 export interface BackbonePop {
   id: string;
   name: string;
+  /** Desenho do marcador; sem configuração preserva a bolinha antiga. */
+  icon?: PopMarkerIcon;
   latitude: number;
   longitude: number;
   /** ID do waypoint que deu origem a este POP, quando aplicável. */
@@ -84,6 +97,7 @@ export interface BackbonePop {
   /** Origem de um POP confirmado manualmente a partir de GeoJSON externo. */
   externalGeojsonSource?: { url: string; featureId: string };
   monitoringFields?: MonitorField[];
+  equipments?: PopEquipment[];
   /** Opcional: campo e condição que deixam o POP vermelho pulsante. */
   alertRule?: PopAlertRule;
 }
@@ -107,6 +121,16 @@ export interface SimpleOptions {
   latitude?: number;
   longitude?: number;
   zoom?: number;
+  /** Chave CARTO Dark Matter (não conceder privilégios de escrita; restringir por site). */
+  cartoBasemapApiKey?: string;
+  /** Preferências gerais do editor nativo do Grafana; todas opcionais para v1.1/v1.2. */
+  defaultBaseMap?: 'escuro' | 'osm' | 'satelite' | 'nenhum';
+  showPopLabels?: boolean;
+  showOperationsSidebar?: boolean;
+  linkWidthScale?: number;
+  pulseDownLinks?: boolean;
+  referenceOpacity?: number;
+  maxGeojsonFeatures?: number;
 
   pops?: BackbonePop[];
   links?: BackboneLink[];

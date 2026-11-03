@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { PanelProps } from '@grafana/data';
 import { Button } from '@grafana/ui';
-import { availableQueryIds, availableQueryItems, linkHealthReport, popHealthReport } from '../monitoring';
+import { availableQueryIds, availableQueryItems, linkHealthReport, popHealthReport, popEquipmentHealthReport } from '../monitoring';
 import type { LinkAlertReason } from '../monitoring';
 import { MonitorFieldsEditor, MonitorFieldsReadout } from './MonitorFieldsEditor';
 import { importMapFile, validateGeometry } from '../kmz';
@@ -12,12 +12,15 @@ import { camadaVisivel, candidatosGeojson, criarIndiceCamadas, definirConfigurac
 import type { FeatureIndexada, GeoJSONDaRede } from '../geo/layers';
 import { criarCamadaGeoJson, segmentosDeFibraGeoJson } from '../geo/renderer';
 import { linksConnectedToPop, nearbyPop, routesConnectedToPop } from '../kmzAssociations';
-import type { AlertOperator, LinkAlertRule, MonitorField, PopAlertRule } from '../types';
+import type { AlertOperator, LinkAlertRule, MonitorField, PopAlertRule, PopEquipment, MapLatLng, PopMarkerIcon } from '../types';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './linkStatus.css';
 import './popStatus.css';
+import './popIcons.css';
 import './editorLayout.css';
+import './darkBasemap.css';
+import './editorUX.css';
 
 import type {
   BackbonePop,
@@ -41,6 +44,11 @@ const DEFAULT_VIEW = {
   longitude: -46.79,
   zoom: 10,
 };
+
+/** Une métricas antigas do POP e as métricas dos equipamentos sem migrar dados existentes. */
+function popFields(pop: BackbonePop): MonitorField[] {
+  return [...(pop.monitoringFields ?? []), ...(pop.equipments ?? []).flatMap(item => item.monitoringFields ?? [])];
+}
 
 // ========================================
 // APARÊNCIA DOS POPs
@@ -143,13 +151,39 @@ function zoomToRoute(map: L.Map | null, route: ImportedRoute): void {
   if (bounds.isValid()) { map.fitBounds(bounds.pad(0.08), { maxZoom: 16 }); }
 }
 
-/** Ícones Leaflet gerados conforme o resultado real das métricas do POP. */
-function popIconForState(state: 'normal' | 'ok' | 'warning' | 'down' | 'no-data'): L.DivIcon {
+/** Ícone padrão preserva o marcador e as animações já existentes. */
+function popIconForState(state: 'normal' | 'ok' | 'warning' | 'down' | 'no-data', kind: PopMarkerIcon = 'bolinha'): L.DivIcon {
+  if (kind === 'bolinha') {
+    return L.divIcon({
+      className: `teif-pop-marker teif-pop-${state}`,
+      html: `<span class="teif-pop-status-core" aria-hidden="true">${state === 'down' ? '<span class="teif-pop-status-x">X</span>' : ''}</span>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+  }
+
+  // SVGs locais (sem URLs externas) e indicador separado da imagem do equipamento.
+  const artwork: Record<Exclude<PopMarkerIcon, 'bolinha'>, string> = {
+    switch: `<rect x="4" y="15" width="40" height="19" rx="4" fill="#263c55" stroke="#b9d9ed" stroke-width="2"/>
+      <rect x="8" y="20" width="5" height="7" rx="1" fill="#83b7d6"/>
+      <rect x="16" y="20" width="5" height="7" rx="1" fill="#83b7d6"/>
+      <rect x="24" y="20" width="5" height="7" rx="1" fill="#83b7d6"/>
+      <rect x="32" y="20" width="5" height="7" rx="1" fill="#83b7d6"/>
+      <circle cx="11" cy="31" r="1.4" fill="#9de7d1"/><circle cx="19" cy="31" r="1.4" fill="#9de7d1"/>
+      <circle cx="27" cy="31" r="1.4" fill="#9de7d1"/>`,
+    torre: `<path d="M24 11L12 43M24 11L36 43M16 34H32M19 26H29M13 43H35" fill="none" stroke="#d4e8f2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="24" cy="9" r="3" fill="#9de7d1"/>
+      <path d="M16 6Q10 12 16 18M32 6Q38 12 32 18M11 2Q1 12 11 23M37 2Q47 12 37 23" fill="none" stroke="#83b7d6" stroke-width="2" stroke-linecap="round"/>`,
+    router: `<ellipse cx="24" cy="17" rx="17" ry="7" fill="#32506d" stroke="#c4e0ef" stroke-width="2"/>
+      <path d="M7 17V31C7 40 41 40 41 31V17" fill="#263c55" stroke="#c4e0ef" stroke-width="2"/>
+      <path d="M14 17H32M32 17L28 13M32 17L28 21M34 31H16M16 31L20 27M16 31L20 35" fill="none" stroke="#9de7d1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
+  };
   return L.divIcon({
-    className: `teif-pop-marker teif-pop-${state}`,
-    html: `<span class="teif-pop-status-core" aria-hidden="true">${state === 'down' ? '<span class="teif-pop-status-x">X</span>' : ''}</span>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
+    className: `teif-pop-device-marker teif-pop-${state}`,
+    html: `<span class="teif-pop-device-body" aria-hidden="true"><svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">${artwork[kind]}</svg></span><span class="teif-pop-device-status" aria-hidden="true">${state === 'down' ? '×' : ''}</span>`,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+    popupAnchor: [0, -22],
   });
 }
 
@@ -183,8 +217,8 @@ const inputStyle: React.CSSProperties = {
 // Editor responsivo: rola dentro do painel, sem empurrar botoes para fora do mapa.
 const editorCardStyle: React.CSSProperties = {
   ...cardStyle,
-  width: 390,
-  maxWidth: '100%',
+  width: 370,
+  maxWidth: 'min(370px, calc(100vw - 28px))',
   maxHeight: '100%',
   minHeight: 0,
   minWidth: 0,
@@ -336,7 +370,7 @@ export const SimplePanel: React.FC<Props> = ({
   const [editMode, setEditMode] = useState(false);
   // Preferências de apresentação são locais: não sobrescrevem o JSON do dashboard.
   const [viewMode, setViewMode] = useState<'noc' | 'projeto'>('noc');
-  const [baseMap, setBaseMap] = useState<'osm' | 'satelite'>('osm');
+  const baseMap = options.defaultBaseMap ?? 'escuro';
 
   // POPs
   const [adding, setAdding] = useState(false);
@@ -346,10 +380,14 @@ export const SimplePanel: React.FC<Props> = ({
     useState<L.LatLng | null>(null);
 
   const [newName, setNewName] = useState('');
+  const [newPopIcon, setNewPopIcon] = useState<PopMarkerIcon>('bolinha');
   const [popCreationMethod, setPopCreationMethod] = useState<'map' | 'coordinates'>('map');
   const [manualLatitude, setManualLatitude] = useState('');
   const [manualLongitude, setManualLongitude] = useState('');
   const [popFormMessage, setPopFormMessage] = useState('');
+  const [newEquipmentName, setNewEquipmentName] = useState('');
+  const [equipmentAddOpen, setEquipmentAddOpen] = useState(false);
+  const [activeEquipmentId, setActiveEquipmentId] = useState<string | null>(null);
 
   // Coordenadas são decimais em graus; aceita vírgula decimal em pt-BR.
   const parseDecimalCoordinate = (text: string): number | undefined => {
@@ -392,6 +430,9 @@ export const SimplePanel: React.FC<Props> = ({
   const [linkTargetId, setLinkTargetId] = useState('');
   const [linkRouteId, setLinkRouteId] = useState('');
   const [linkCreateMessage, setLinkCreateMessage] = useState('');
+  const [linkCreationMethod, setLinkCreationMethod] = useState<'pops' | 'draw'>('pops');
+  const [drawPoints, setDrawPoints] = useState<MapLatLng[]>([]);
+  const drawLayerRef = useRef<L.LayerGroup | null>(null);
 
   const [selectedLinkId, setSelectedLinkId] = useState<string | null>(null);
   const [editLinkName, setEditLinkName] = useState('');
@@ -403,7 +444,7 @@ export const SimplePanel: React.FC<Props> = ({
     (pop) => pop.id === selectedId
   );
   const selectedPopReport = selectedPop
-    ? popHealthReport(selectedPop.alertRule, selectedPop.monitoringFields ?? [], queryItems)
+    ? popEquipmentHealthReport(selectedPop, queryItems)
     : null;
 
   const selectedExternal = externalIndex.find(item => item.id === selectedExternalId &&
@@ -463,6 +504,9 @@ export const SimplePanel: React.FC<Props> = ({
     setSelectedExternalId(null);
     setSelectedId(pop.id);
     setEditName(pop.name);
+    setEquipmentAddOpen(false);
+    setNewEquipmentName('');
+    setActiveEquipmentId(null);
     setConfirmDelete(false);
     setConfirmDeleteLink(false);
   };
@@ -760,6 +804,32 @@ export const SimplePanel: React.FC<Props> = ({
     });
   };
 
+  const addEquipment = (popId: string) => {
+    const name = newEquipmentName.trim();
+    if (!name) { return; }
+    const current = optionsRef.current;
+    const id = `device-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    changeCurrentOptions({ ...current, pops: (current.pops ?? []).map(pop => pop.id === popId ? {
+      ...pop, equipments: [...(pop.equipments ?? []), { id, name, monitoringFields: [] }],
+    } : pop) });
+    setNewEquipmentName(''); setActiveEquipmentId(id);
+  };
+
+  const updateEquipment = (popId: string, deviceId: string, patch: Partial<PopEquipment>) => {
+    const current = optionsRef.current;
+    changeCurrentOptions({ ...current, pops: (current.pops ?? []).map(pop => pop.id === popId ? {
+      ...pop, equipments: (pop.equipments ?? []).map(device => {
+        if (device.id !== deviceId) { return device; }
+        const next = { ...device, ...patch };
+        if (patch.monitoringFields && next.alertRule &&
+            !patch.monitoringFields.some(field => field.id === next.alertRule?.fieldId)) {
+          next.alertRule = undefined;
+        }
+        return next;
+      }),
+    } : pop) });
+  };
+
   const updatePopMonitoringFields = (popId: string, fields: MonitorField[]) => {
     updatePopProperties(popId, { monitoringFields: fields });
   };
@@ -801,11 +871,8 @@ export const SimplePanel: React.FC<Props> = ({
       initial.zoom
     );
 
-    // OpenStreetMap começa como fundo; alternância não recria o mapa nem os POPs.
-    baseTileRef.current = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
+    // O mapa inicia sem tiles. O efeito de mapa-base abaixo escolhe o fundo;
+    // em "Sem fundo" não há requisição desnecessária ao OpenStreetMap.
 
     // Rotas de referência ficam abaixo dos enlaces monitorados.
     const kmzPreviewGroup = L.layerGroup().addTo(map);
@@ -814,6 +881,8 @@ export const SimplePanel: React.FC<Props> = ({
 
     // Camada dos enlaces
     const linkGroup = L.layerGroup().addTo(map);
+    // Prévia do desenho manual, isolada das rotas salvas.
+    drawLayerRef.current = L.layerGroup().addTo(map);
 
     // Camada dos POPs
     const markerGroup = L.layerGroup().addTo(map);
@@ -840,6 +909,7 @@ export const SimplePanel: React.FC<Props> = ({
       baseTileRef.current = null;
       markersRef.current = null;
       linksRef.current = null;
+      drawLayerRef.current = null;
       kmzPreviewRef.current = null;
       externalGeojsonRef.current = null;
       externalHighlightRef.current = null;
@@ -847,26 +917,47 @@ export const SimplePanel: React.FC<Props> = ({
     };
   }, []);
 
-  // Modo satélite opcional, apenas visual. Mantém o mesmo sistema de coordenadas.
+  // Fundo escuro com CARTO Dark Matter quando existe chave configurada.
+  // Sem chave, o estilo escuro usa OSM com filtro CSS até a chave ser informada.
+  // Não utilizamos tiles CARTO sem chave para evitar marcas d'água de erro.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) { return; }
-    const old = baseTileRef.current;
-    if (old) { map.removeLayer(old); }
-    const tile = baseMap === 'satelite'
-      ? L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          maxZoom: 19,
-          maxNativeZoom: 19,
-          attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics and the GIS User Community',
-        })
-      : L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom: 19,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-        });
-    tile.addTo(map);
-    tile.bringToBack();
+    const currentTile = baseTileRef.current;
+    if (currentTile) { map.removeLayer(currentTile); }
+    const key = (options.cartoBasemapApiKey ?? '').trim();
+    const darkCarto = baseMap === 'escuro' && !!key;
+    // "Sem fundo" remove apenas o mapa-base; os grupos de POPs, enlaces,
+    // alertas e GeoJSON/KMZ continuam ativos nas mesmas coordenadas.
+    const tile = baseMap === 'nenhum'
+      ? null
+      : baseMap === 'satelite'
+        ? L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19, attribution: 'Tiles &copy; Esri, Maxar, Earthstar Geographics and the GIS User Community',
+          })
+        : darkCarto
+          ? L.tileLayer(`https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=${encodeURIComponent(key)}`, {
+              maxZoom: 20, attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+            })
+          : L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+              maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
+            });
+    if (tile) {
+      tile.addTo(map);
+      tile.bringToBack();
+    }
     baseTileRef.current = tile;
-  }, [baseMap]);
+    const container = map.getContainer();
+    // Transparente acompanha o tema/fundo definido no dashboard do Grafana.
+    // Evita a cor cinza padrão do Leaflet ao não existir uma camada de tiles.
+    container.style.backgroundColor = baseMap === 'nenhum' ? 'transparent' : '';
+    container.classList.toggle('teif-dark-fallback', baseMap === 'escuro' && !key);
+    container.classList.toggle('teif-dark-map', baseMap === 'escuro');
+    return () => {
+      container.classList.remove('teif-dark-fallback', 'teif-dark-map');
+      container.style.backgroundColor = '';
+    };
+  }, [baseMap, options.cartoBasemapApiKey]);
 
   // ======================================
   // 2. ATUALIZAR POSIÇÃO DO MAPA
@@ -925,7 +1016,7 @@ export const SimplePanel: React.FC<Props> = ({
         if (drawn >= 500) { break; } // Evita excesso de objetos SVG simultâneos.
         if (!bbox.isValid() || !bounds.intersects(bbox) || !camadaVisivel(route, settings, zoom)) { continue; }
         const polyline = L.polyline(segments, {
-          color: '#59bfe8', weight: 3, opacity: 0.6,
+          color: '#59bfe8', weight: 3, opacity: Math.max(0.1, Math.min(1, options.referenceOpacity ?? 0.6)),
           dashArray: '6 7', interactive: true,
         }).addTo(group);
         const tooltip = document.createElement('span');
@@ -953,7 +1044,7 @@ export const SimplePanel: React.FC<Props> = ({
     map.on('moveend zoomend', renderPreview);
     return () => { map.off('moveend zoomend', renderPreview); group.clearLayers(); };
   }, [options.importedRoutes, options.importedWaypoints, options.pops, options.links,
-      options.showKmzPreview, options.kmzLayerSettings]);
+      options.showKmzPreview, options.kmzLayerSettings, options.referenceOpacity]);
 
   // ======================================
   // v1.2 — GEOJSON EXTERNO (SEM SALVAR MILHARES DE PONTOS NO DASHBOARD)
@@ -1029,7 +1120,7 @@ export const SimplePanel: React.FC<Props> = ({
         ftth: settings.ftth,
         outros: settings.outros,
         zoomMinimoFtth: settings.minZoomFtth,
-        maximo: 850, // Limite de elementos por tela; não descarta dados do arquivo.
+        maximo: Math.max(50, Math.min(650, options.maxGeojsonFeatures ?? 650)), // Somente renderização; dados íntegros.
         pontos: settings.points,
       });
       let rendered = 0;
@@ -1056,13 +1147,13 @@ export const SimplePanel: React.FC<Props> = ({
           layer.addTo(group);
           rendered++;
         }
-        if (rendered >= 650) { break; }
+        if (rendered >= Math.max(50, Math.min(650, options.maxGeojsonFeatures ?? 650))) { break; }
       }
     };
     updateExternal();
     map.on('moveend zoomend', updateExternal);
     return () => { map.off('moveend zoomend', updateExternal); group.clearLayers(); };
-  }, [externalIndex, options.showExternalGeojson, options.showKmzPreview, options.kmzLayerSettings, adding, creatingLink]);
+  }, [externalIndex, options.showExternalGeojson, options.showKmzPreview, options.kmzLayerSettings, options.maxGeojsonFeatures, adding, creatingLink]);
 
   // Camada de seleção separada: não recria as 650 rotas ao clicar em uma fibra.
   useEffect(() => {
@@ -1104,14 +1195,18 @@ export const SimplePanel: React.FC<Props> = ({
         externalRoute.url === (options.externalGeojsonUrl ?? '').trim()
         ? externalRoute.featureIds.flatMap(id => {
             const item = geojsonById.get(id);
-            return item ? segmentosDeFibraGeoJson(item) : [];
+            return item
+              ? segmentosDeFibraGeoJson(item).map(segment =>
+                  segment.map(([lat, lng]) => L.latLng(lat, lng))
+                )
+              : [];
           }) : [];
       const segments: L.LatLng[][] = externalSegments.length > 0 ? externalSegments :
         assignedRoute ? leafletRouteSegments(assignedRoute) : [[from, to]];
       const points: L.LatLng[][] = segments;
       const report = linkHealthReport(link.alertRule, link.monitoringFields ?? [], queryItems);
       const state = report.state;
-      const weight = link.width || 4;
+      const weight = Math.max(1, Math.min(16, (link.width || 4) * (options.linkWidthScale ?? 1)));
 
       // Contorno escuro fixo durante o alerta: cabo NUNCA desaparece no pulso.
       if (state === 'down' || state === 'warning') {
@@ -1121,11 +1216,11 @@ export const SimplePanel: React.FC<Props> = ({
       }
 
       L.polyline(points, {
-        color: state === 'down' ? '#a51c29' : state === 'warning' ? '#facc15' : state === 'no-data' ? '#9299a6' : (link.color || '#00ff66'),
+        color: state === 'down' ? '#ef4444' : state === 'warning' ? '#facc15' : state === 'ok' ? '#22c55e' : '#94a3b8',
         weight,
         opacity: state === 'down' || state === 'warning' ? 1 : 0.9,
-        dashArray: state === 'no-data' ? '8 7' : undefined,
-        className: state === 'down' ? 'teif-link-alert-stroke' : undefined,
+        dashArray: state === 'no-data' || state === 'normal' ? '8 7' : undefined,
+        className: state === 'down' && (options.pulseDownLinks ?? true) ? 'teif-link-alert-stroke' : undefined,
         interactive: false,
       }).addTo(group);
 
@@ -1143,7 +1238,7 @@ export const SimplePanel: React.FC<Props> = ({
       // Área invisível mais larga: mantém o clique acessível no cabo.
       const label = document.createElement('span');
       const stateLabel = state === 'down' ? 'DOWN' :
-        state === 'warning' ? 'ATENÇÃO' : state === 'no-data' ? 'SEM DADOS' : state === 'ok' ? 'NORMAL' : '';
+        state === 'warning' ? 'ATENÇÃO' : state === 'no-data' ? 'SEM DADOS' : state === 'ok' ? 'UP' : 'NÃO CONFIGURADO';
       const reasons = state === 'down' && report.downReason
         ? [report.downReason.fieldName]
         : state === 'warning' ? report.warningReasons.map((reason) => reason.fieldName) : [];
@@ -1171,7 +1266,7 @@ export const SimplePanel: React.FC<Props> = ({
     };
     map.on('moveend zoomend resize', updateXPositions);
     return () => { map.off('moveend zoomend resize', updateXPositions); };
-  }, [options.pops, options.links, options.importedRoutes, options.externalGeojsonUrl, geojsonById, adding, creatingLink, queryItems]);
+  }, [options.pops, options.links, options.importedRoutes, options.externalGeojsonUrl, options.linkWidthScale, options.pulseDownLinks, geojsonById, adding, creatingLink, queryItems]);
 
   // Criação compartilhada entre cliques no mapa e seleção por listas.
   const createLinkBetween = (sourcePopId: string, targetPopId: string, desiredRouteId = ''): boolean => {
@@ -1203,6 +1298,36 @@ export const SimplePanel: React.FC<Props> = ({
     return true;
   };
 
+  const createDrawnLink = () => {
+    const current = optionsRef.current;
+    const origin = (current.pops ?? []).find(item => item.id === linkOriginId);
+    const target = (current.pops ?? []).find(item => item.id === linkTargetId);
+    if (!origin || !target || origin.id === target.id) {
+      setLinkCreateMessage('Selecione POP de origem e destino diferentes.'); return;
+    }
+    if (drawPoints.length < 1) {
+      setLinkCreateMessage('Clique no mapa para marcar ao menos um ponto intermediário do trajeto.'); return;
+    }
+    const id = `route-manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const name = `${origin.name} - ${target.name}`;
+    const route: ImportedRoute = {
+      id, name: `Trajeto manual: ${name}`, sourceFile: 'desenho-manual',
+      sourcePopId: origin.id, targetPopId: target.id,
+      segments: [[[origin.latitude, origin.longitude], ...drawPoints, [target.latitude, target.longitude]]],
+    };
+    const link: BackboneLink = {
+      id: `link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name, sourcePopId: origin.id, targetPopId: target.id, color: '#94a3b8', width: 4, routeId: id,
+    };
+    changeCurrentOptions({ ...current,
+      importedRoutes: [...(current.importedRoutes ?? []), route],
+      links: [...(current.links ?? []), link],
+    });
+    setCreatingLink(false); setDrawPoints([]); setLinkOriginId(null);
+    setLinkTargetId(''); setSelectedLinkId(link.id); setEditLinkName(link.name);
+    setLinkCreateMessage('');
+  };
+
   // ======================================
   // 5. DESENHAR POPs
   // ======================================
@@ -1217,12 +1342,12 @@ export const SimplePanel: React.FC<Props> = ({
     group.clearLayers();
 
     for (const pop of options.pops ?? []) {
-      const report = popHealthReport(pop.alertRule, pop.monitoringFields ?? [], queryItems);
+      const report = popEquipmentHealthReport(pop, queryItems);
       const state = report.state;
       const marker = L.marker(
         [pop.latitude, pop.longitude],
         {
-          icon: popIconForState(state),
+          icon: popIconForState(state, pop.icon ?? 'bolinha'),
           draggable: editMode && !creatingLink,
           bubblingMouseEvents: false,
         }
@@ -1238,7 +1363,7 @@ export const SimplePanel: React.FC<Props> = ({
       label.textContent = `${pop.name}${statusLabel ? ` — ${statusLabel}` : ''}${reasons.length ? ` (${reasons.join(', ')})` : ''}`;
 
       marker.bindTooltip(label, {
-        permanent: true,
+        permanent: options.showPopLabels ?? true,
         direction: 'top',
         offset: [0, -12],
       });
@@ -1256,11 +1381,11 @@ export const SimplePanel: React.FC<Props> = ({
             return;
           }
 
-          // Impedir ligação consigo mesmo
-          if (linkOriginId === pop.id) {
+          if (linkOriginId === pop.id) { return; }
+          if (linkCreationMethod === 'draw') {
+            setLinkTargetId(pop.id);
             return;
           }
-
           createLinkBetween(linkOriginId, pop.id, linkRouteId);
           return;
         }
@@ -1309,7 +1434,9 @@ export const SimplePanel: React.FC<Props> = ({
     creatingLink,
     linkOriginId,
     linkRouteId,
+    linkCreationMethod,
     queryItems,
+    options.showPopLabels,
   ]);
 
   // ======================================
@@ -1344,6 +1471,36 @@ export const SimplePanel: React.FC<Props> = ({
       container.style.cursor = '';
     };
   }, [adding, popCreationMethod]);
+
+  // Desenho manual: os pontos são temporários até clicar em Criar enlace.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !creatingLink || linkCreationMethod !== 'draw' || !linkOriginId || !linkTargetId) { return; }
+    const onClick = (event: L.LeafletMouseEvent) => {
+      setDrawPoints(prev => prev.length < 500 ? [...prev, [event.latlng.lat, event.latlng.lng]] : prev);
+    };
+    map.on('click', onClick);
+    map.getContainer().style.cursor = 'crosshair';
+    return () => { map.off('click', onClick); map.getContainer().style.cursor = ''; };
+  }, [creatingLink, linkCreationMethod, linkOriginId, linkTargetId]);
+
+  useEffect(() => {
+    const layer = drawLayerRef.current;
+    if (!layer) { return; }
+    layer.clearLayers();
+    if (!creatingLink || linkCreationMethod !== 'draw') { return; }
+    const origin = pops.find(item => item.id === linkOriginId);
+    const target = pops.find(item => item.id === linkTargetId);
+    const points: MapLatLng[] = [
+      ...(origin ? [[origin.latitude, origin.longitude] as MapLatLng] : []),
+      ...drawPoints,
+      ...(target ? [[target.latitude, target.longitude] as MapLatLng] : []),
+    ];
+    if (points.length > 1) {
+      L.polyline(points, { color: '#60a5fa', dashArray: '7 5', weight: 5, opacity: 0.9, interactive: false }).addTo(layer);
+    }
+    drawPoints.forEach(pt => L.circleMarker(pt, { radius: 5, color: '#93c5fd', fillOpacity: 1, interactive: false }).addTo(layer));
+  }, [creatingLink, linkCreationMethod, linkOriginId, linkTargetId, drawPoints, pops]);
 
   // ======================================
   // 7. SALVAR POSIÇÃO ATUAL
@@ -1395,6 +1552,7 @@ export const SimplePanel: React.FC<Props> = ({
       return;
     }
     const novoPop: BackbonePop = {
+      icon: newPopIcon,
       id: `pop-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       name,
       latitude: Number(lat.toFixed(6)),
@@ -1405,9 +1563,13 @@ export const SimplePanel: React.FC<Props> = ({
     setAdding(false);
     setPopFormOpen(false);
     setNewName('');
+    setNewPopIcon('bolinha');
     setManualLatitude('');
     setManualLongitude('');
     setPopFormMessage('');
+    setSelectedId(novoPop.id);
+    setEditName(novoPop.name);
+    setActiveEquipmentId(null);
     mapRef.current?.setView([lat, lng], Math.max(mapRef.current.getZoom(), 13));
   };
 
@@ -1486,6 +1648,7 @@ export const SimplePanel: React.FC<Props> = ({
       setConfirmDelete(false);
       setConfirmDeleteLink(false);
       setCreatingLink(false);
+      setDrawPoints([]);
       setLinkOriginId(null);
       setLinkTargetId('');
       setLinkRouteId('');
@@ -1507,10 +1670,13 @@ export const SimplePanel: React.FC<Props> = ({
       setLinkTargetId('');
       setLinkRouteId('');
       setLinkCreateMessage('');
+      setDrawPoints([]);
       return;
     }
 
     setCreatingLink(true);
+    setLinkCreationMethod('pops');
+    setDrawPoints([]);
     setLinkOriginId(null);
     setLinkTargetId('');
     setLinkRouteId('');
@@ -1581,122 +1747,58 @@ export const SimplePanel: React.FC<Props> = ({
           pointerEvents: 'none',
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            gap: 6,
-            pointerEvents: 'auto',
-            flexShrink: 0,
-            flexWrap: 'wrap',
-            justifyContent: 'flex-end',
-            background: 'rgba(15, 23, 42, 0.96)',
-            padding: 8,
-            borderRadius: 8,
-            border:
-              '1px solid rgba(0, 255, 255, 0.65)',
-            boxShadow:
-              '0 4px 16px rgba(0, 0, 0, 0.5)',
-          }}
-        >
-          <Button size="sm" variant={viewMode === 'noc' ? 'primary' : 'secondary'} disabled={editMode}
-            onClick={() => {
-              const next = viewMode === 'noc' ? 'projeto' : 'noc';
-              setViewMode(next);
-              setLayerViewerOpen(next === 'projeto' && externalIndex.length > 0);
-            }}>
-            {viewMode === 'noc' ? 'NOC' : 'Projeto'}
+        <div className="teif-edit-entry">
+          <Button size="sm" variant={editMode ? 'primary' : 'secondary'} onClick={() => {
+            if (!editMode) { setViewMode('projeto'); setLayerViewerOpen(false); }
+            else { setViewMode('noc'); }
+            alternarEdicao();
+          }}>
+            {editMode ? '✓ Concluir' : '✎ Edit'}
           </Button>
-
-          <Button size="sm" variant="secondary" onClick={() => setBaseMap(current => current === 'osm' ? 'satelite' : 'osm')}>
-            {baseMap === 'osm' ? 'Satélite' : 'Ruas'}
-          </Button>
-
-          {viewMode === 'projeto' && <Button
-            size="sm"
-            variant="secondary"
-            onClick={salvarPosicaoAtual}
-          >
-            Usar posição atual
-          </Button>}
-
-          {viewMode === 'projeto' && !!externalIndex.length && <Button size="sm"
-            variant={layerViewerOpen ? 'primary' : 'secondary'}
-            onClick={() => setLayerViewerOpen((open) => !open)}>
-            Camadas
-          </Button>}
-
-          {viewMode === 'projeto' && <Button
-            size="sm"
-            variant={editMode ? 'primary' : 'secondary'}
-            onClick={alternarEdicao}
-          >
-            {editMode
-              ? 'Concluir edição'
-              : 'Editar POPs'}
-          </Button>}
-
-          {editMode && (
-            <Button
-              size="sm"
-              variant="primary"
-              onClick={() => {
-                setAdding(true);
-                setPopFormOpen(true);
-                setPopCreationMethod('map');
-                setNewName('');
-                setManualLatitude('');
-                setManualLongitude('');
-                setPopFormMessage('');
-                setCreatingLink(false);
-                setLinkOriginId(null);
-                setLinkTargetId('');
-                setPendingPosition(null);
-                setSelectedId(null);
-                setSelectedLinkId(null);
-                setKmzManagerOpen(false);
-              }}
-            >
-              Adicionar POP
-            </Button>
-          )}
-
-          {editMode && (
-            <Button
-              size="sm"
-              variant={
-                creatingLink ? 'primary' : 'secondary'
-              }
-              onClick={alternarCriacaoEnlace}
-              disabled={pops.length < 2 && !creatingLink}
-            >
-              {creatingLink
-                ? 'Cancelar enlace'
-                : 'Criar enlace'}
-            </Button>
-          )}
-
-          {editMode && (
-            <Button
-              size="sm"
-              variant={kmzManagerOpen ? 'primary' : 'secondary'}
-              onClick={() => {
-                setKmzManagerOpen((open) => !open);
-                setAdding(false);
-                setPopFormOpen(false);
-                setPendingPosition(null);
-                setCreatingLink(false);
-                setLinkOriginId(null);
-                setLinkTargetId('');
-                setSelectedId(null);
-                setSelectedLinkId(null);
-              }}
-            >
-              Rotas KMZ
-            </Button>
-          )}
         </div>
 
-        {viewMode === 'noc' && !editMode && !layerViewerOpen && (
+        {editMode && (
+          <nav className="teif-edit-rail" aria-label="Ferramentas de edição">
+            <button type="button" className={`teif-edit-tool ${popFormOpen ? 'is-active' : ''}`}
+              aria-label="Adicionar POP" title="Adicionar POP" aria-pressed={popFormOpen}
+              onClick={() => {
+                setPopFormOpen(true); setAdding(true); setPopCreationMethod('map');
+                setNewName(''); setNewPopIcon('bolinha'); setPopFormMessage(''); setPendingPosition(null);
+                setSelectedId(null); setSelectedLinkId(null); setSelectedExternalId(null);
+                setCreatingLink(false); setDrawPoints([]); setKmzManagerOpen(false);
+              }}>
+              <span className="teif-edit-symbol" aria-hidden="true">⌖</span><span>POP</span>
+            </button>
+            <button type="button" className={`teif-edit-tool ${creatingLink ? 'is-active' : ''}`}
+              aria-label="Criar enlace" title="Criar enlace" aria-pressed={creatingLink}
+              disabled={pops.length < 2 && !creatingLink}
+              onClick={() => {
+                if (!creatingLink) { alternarCriacaoEnlace(); setKmzManagerOpen(false); }
+                else { alternarCriacaoEnlace(); }
+                setPopFormOpen(false); setAdding(false); setSelectedId(null);
+                setSelectedLinkId(null); setSelectedExternalId(null);
+              }}>
+              <span className="teif-edit-symbol" aria-hidden="true">⌁</span><span>Enlace</span>
+            </button>
+            <button type="button" className={`teif-edit-tool ${kmzManagerOpen ? 'is-active' : ''}`}
+              aria-label="Importar e gerenciar rotas KMZ" title="Importar rotas KMZ / KML" aria-pressed={kmzManagerOpen}
+              onClick={() => {
+                setKmzManagerOpen(open => !open); setPopFormOpen(false);
+                setAdding(false); setPendingPosition(null); setCreatingLink(false); setDrawPoints([]);
+                setSelectedId(null); setSelectedLinkId(null); setSelectedExternalId(null);
+              }}>
+              <span className="teif-edit-symbol" aria-hidden="true">▱</span><span>Rotas</span>
+            </button>
+            <details className="teif-edit-more">
+              <summary aria-label="Outras ações" title="Outras ações">···</summary>
+              <div className="teif-edit-more-menu">
+                <button type="button" onClick={salvarPosicaoAtual}>Salvar visão atual</button>
+              </div>
+            </details>
+          </nav>
+        )}
+
+        {(options.showOperationsSidebar ?? true) && viewMode === 'noc' && !editMode && !layerViewerOpen && (
           <OperationSidebar
             pops={pops}
             links={links}
@@ -1837,7 +1939,7 @@ export const SimplePanel: React.FC<Props> = ({
                 {!!externalMessage && <small style={{ color: '#ffcf80' }}>{externalMessage}</small>}
               </div>
             ) : (
-              <small>Para configurar monitoramento, clique em Editar POPs e selecione a fibra novamente.</small>
+              <small>Para configurar monitoramento, clique em Edit e selecione a fibra novamente.</small>
             )}
           </div>
         )}
@@ -1846,11 +1948,20 @@ export const SimplePanel: React.FC<Props> = ({
         {creatingLink && (
           <div className="teif-monitor-editor" style={editorCardStyle}>
             <strong>Criar enlace</strong>
-            <small>Selecione dois POPs existentes ou clique na origem e no destino diretamente no mapa.</small>
+            <div style={{ display: 'flex', gap: 7 }}>
+              <Button size="sm" variant={linkCreationMethod === 'pops' ? 'primary' : 'secondary'}
+                onClick={() => { setLinkCreationMethod('pops'); setDrawPoints([]); }}>Entre POPs</Button>
+              <Button size="sm" variant={linkCreationMethod === 'draw' ? 'primary' : 'secondary'}
+                onClick={() => { setLinkCreationMethod('draw'); setDrawPoints([]); }}>Desenhar no mapa</Button>
+            </div>
+            <small>{linkCreationMethod === 'pops'
+              ? 'Selecione dois POPs ou clique em ambos no mapa.'
+              : 'Selecione os POPs de origem e destino, depois clique no mapa para traçar pontos intermediários.'}</small>
             <label style={{ fontSize: 12 }}>POP de origem</label>
             <select style={inputStyle} value={linkOriginId ?? ''} onChange={(event) => {
               setLinkOriginId(event.target.value || null);
               setLinkTargetId('');
+              setDrawPoints([]);
               setLinkCreateMessage('');
             }}>
               <option value="">Selecione o POP de origem...</option>
@@ -1859,6 +1970,7 @@ export const SimplePanel: React.FC<Props> = ({
             <label style={{ fontSize: 12 }}>POP de destino</label>
             <select style={inputStyle} value={linkTargetId} onChange={(event) => {
               setLinkTargetId(event.target.value);
+              setDrawPoints([]);
               setLinkCreateMessage('');
             }}>
               <option value="">Selecione o POP de destino...</option>
@@ -1866,7 +1978,7 @@ export const SimplePanel: React.FC<Props> = ({
                 <option key={pop.id} value={pop.id}>{pop.name}</option>
               ))}
             </select>
-            {importedRoutes.length > 0 && (
+            {linkCreationMethod === 'pops' && importedRoutes.length > 0 && (
               <>
                 <label style={{ fontSize: 12 }}>Trajeto KMZ (opcional)</label>
                 <select style={inputStyle} value={linkRouteId} onChange={(event) => setLinkRouteId(event.target.value)}>
@@ -1876,14 +1988,28 @@ export const SimplePanel: React.FC<Props> = ({
               </>
             )}
             {linkCreateMessage && <small style={{ color: '#ffb45c' }}>{linkCreateMessage}</small>}
+            {linkCreationMethod === 'draw' && (
+              <>
+                <small>Pontos intermediários: {drawPoints.length} (máximo 500)</small>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <Button size="sm" variant="secondary" disabled={!drawPoints.length}
+                    onClick={() => setDrawPoints(p => p.slice(0, -1))}>Desfazer ponto</Button>
+                  <Button size="sm" variant="secondary" disabled={!drawPoints.length}
+                    onClick={() => setDrawPoints([])}>Limpar desenho</Button>
+                </div>
+              </>
+            )}
             <Button size="sm" variant="primary"
-              disabled={!linkOriginId || !linkTargetId || linkOriginId === linkTargetId}
-              onClick={() => { if (linkOriginId) { createLinkBetween(linkOriginId, linkTargetId, linkRouteId); } }}>
-              Criar enlace pelos POPs selecionados
+              disabled={!linkOriginId || !linkTargetId || linkOriginId === linkTargetId || (linkCreationMethod === 'draw' && !drawPoints.length)}
+              onClick={() => {
+                if (linkCreationMethod === 'draw') { createDrawnLink(); }
+                else if (linkOriginId) { createLinkBetween(linkOriginId, linkTargetId, linkRouteId); }
+              }}>
+              {linkCreationMethod === 'draw' ? 'Salvar enlace desenhado' : 'Criar enlace entre POPs'}
             </Button>
-            <small>Atalho no mapa: clique no primeiro POP e depois no segundo. Se houver fibras paralelas, você pode criar mais de um enlace entre os mesmos POPs.</small>
+            {linkCreationMethod === 'pops' && <small>Atalho: clique nos dois POPs no mapa.</small>}
             <Button size="sm" variant="secondary" onClick={() => {
-              setCreatingLink(false); setLinkOriginId(null); setLinkTargetId(''); setLinkRouteId('');
+              setCreatingLink(false); setDrawPoints([]); setLinkOriginId(null); setLinkTargetId(''); setLinkRouteId('');
             }}>Cancelar</Button>
           </div>
         )}
@@ -1904,6 +2030,14 @@ export const SimplePanel: React.FC<Props> = ({
             <label style={{ fontSize: 12 }}>Nome do POP</label>
             <input style={inputStyle} placeholder="Ex.: ITA_G5" maxLength={80}
               value={newName} onChange={(event) => setNewName(event.target.value)} />
+            <label style={{ fontSize: 12 }} htmlFor="teif-new-pop-icon">Ícone do POP</label>
+            <select id="teif-new-pop-icon" style={inputStyle} value={newPopIcon}
+              onChange={(event) => setNewPopIcon(event.target.value as PopMarkerIcon)}>
+              <option value="bolinha">Bolinha (padrão)</option>
+              <option value="switch">Switch</option>
+              <option value="torre">Torre</option>
+              <option value="router">Router</option>
+            </select>
             {popCreationMethod === 'map' ? (
               pendingPosition ? (
                 <small>Posição escolhida: {pendingPosition.lat.toFixed(6)}, {pendingPosition.lng.toFixed(6)}</small>
@@ -1948,58 +2082,96 @@ export const SimplePanel: React.FC<Props> = ({
 
             {editMode ? (
               <>
-            <input
-              style={inputStyle}
-              value={editName}
-              maxLength={80}
-              onChange={(event) =>
-                setEditName(event.target.value)
-              }
-            />
-
-            <small>
-              Lat: {selectedPop.latitude.toFixed(6)}
-              {' | '}
-              Lon: {selectedPop.longitude.toFixed(6)}
-            </small>
-
-            <small>
-              Arraste o marcador para movê-lo.
-            </small>
-
-            <Button
-              size="sm"
-              variant="primary"
-              disabled={!editName.trim()}
-              onClick={renomearPop}
-            >
-              Salvar nome
-            </Button>
-
-            {!confirmDelete ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setConfirmDelete(true)}
-              >
-                Excluir POP
-              </Button>
-            ) : (
-              <>
-                <small>
-                  Os enlaces conectados também serão excluídos.
-                </small>
-
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={excluirPop}
-                >
-                  Confirmar exclusão
+            <div className="teif-editor-identity">
+              <input style={inputStyle} value={editName} maxLength={80}
+                aria-label="Nome do POP" onChange={event => setEditName(event.target.value)} />
+              <Button size="sm" variant="primary" disabled={!editName.trim() || editName.trim() === selectedPop.name}
+                onClick={renomearPop}>Salvar nome</Button>
+            </div>
+            <label style={{ fontSize: 12 }} htmlFor="teif-edit-pop-icon">Ícone do POP</label>
+            <select id="teif-edit-pop-icon" style={inputStyle} value={selectedPop.icon ?? 'bolinha'}
+              onChange={(event) => updatePopProperties(selectedPop.id, { icon: event.target.value as PopMarkerIcon })}>
+              <option value="bolinha">Bolinha (padrão)</option>
+              <option value="switch">Switch</option>
+              <option value="torre">Torre</option>
+              <option value="router">Router</option>
+            </select>
+            <small className="teif-muted">{selectedPop.latitude.toFixed(6)}, {selectedPop.longitude.toFixed(6)} · Arraste o marcador para mover</small>
+            <div style={{ borderTop: '1px solid #405065', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="teif-editor-section-head">
+                <strong>Equipamentos ({selectedPop.equipments?.length ?? 0})</strong>
+                <Button size="sm" variant="primary" onClick={() => setEquipmentAddOpen(open => !open)}>
+                  {equipmentAddOpen ? 'Cancelar' : '+ Adicionar equipamento'}
                 </Button>
-              </>
-            )}
-
+              </div>
+              {(selectedPop.equipments ?? []).map(device => (
+                <div key={device.id} style={{ display: 'flex', flexDirection: 'column', gap: 8,
+                  background: '#111827', border: '1px solid #405065', borderRadius: 6, padding: 9 }}>
+                  <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                    <Button size="sm" variant="secondary" onClick={() => setActiveEquipmentId(id => id === device.id ? null : device.id)}>
+                      {activeEquipmentId === device.id ? '−' : '+'}
+                    </Button>
+                    <strong style={{ flex: 1, overflowWrap: 'anywhere' }}>{device.name}</strong>
+                    <small>{device.monitoringFields?.length ?? 0} métricas</small>
+                  </div>
+                  {activeEquipmentId === device.id && (
+                    <>
+                      <label style={{ fontSize: 12 }}>Nome do equipamento</label>
+                      <input style={inputStyle} value={device.name} maxLength={100}
+                        onChange={e => updateEquipment(selectedPop.id, device.id, { name: e.target.value })} />
+                      <label style={{ fontSize: 12 }}>Host no Zabbix (identificador informativo)</label>
+                      <input style={inputStyle} value={device.hostName ?? ''} placeholder="Ex.: POP_CENTRO_S6730"
+                        onChange={e => updateEquipment(selectedPop.id, device.id, { hostName: e.target.value })} />
+                      <MonitorFieldsEditor fields={device.monitoringFields ?? []} items={queryItems} queryIds={queryIds}
+                        onChange={fields => updateEquipment(selectedPop.id, device.id, { monitoringFields: fields })}
+                        enableWarningThresholds />
+                      <small>Estado DOWN deste equipamento (opcional):</small>
+                      <select style={inputStyle} value={device.alertRule?.fieldId ?? ''} onChange={e => {
+                        const id = e.target.value;
+                        updateEquipment(selectedPop.id, device.id, { alertRule: id
+                          ? { fieldId: id, operator: device.alertRule?.operator ?? 'eq', value: device.alertRule?.value ?? '0' }
+                          : undefined });
+                      }}>
+                        <option value="">Sem regra DOWN</option>
+                        {(device.monitoringFields ?? []).map(field => <option key={field.id} value={field.id}>{field.name}</option>)}
+                      </select>
+                      {device.alertRule && <div style={{ display: 'flex', gap: 6 }}>
+                        <select style={{ ...inputStyle, width: 130 }} value={device.alertRule.operator}
+                          onChange={e => updateEquipment(selectedPop.id, device.id, { alertRule: { ...device.alertRule!, operator: e.target.value as AlertOperator } })}>
+                          <option value="eq">Igual</option><option value="ne">Diferente</option>
+                          <option value="gt">Maior</option><option value="gte">Maior/igual</option>
+                          <option value="lt">Menor</option><option value="lte">Menor/igual</option>
+                        </select>
+                        <input style={inputStyle} value={device.alertRule.value}
+                          onChange={e => updateEquipment(selectedPop.id, device.id, { alertRule: { ...device.alertRule!, value: e.target.value } })} />
+                      </div>}
+                      <small>Estado: {popHealthReport(device.alertRule, device.monitoringFields ?? [], queryItems).state}</small>
+                      <Button size="sm" variant="secondary" onClick={() => {
+                        const next = (selectedPop.equipments ?? []).filter(d => d.id !== device.id);
+                        updatePopProperties(selectedPop.id, { equipments: next,
+                          alertRule: next.some(d => d.monitoringFields?.some(f => f.id === selectedPop.alertRule?.fieldId)) ||
+                            (selectedPop.monitoringFields ?? []).some(f => f.id === selectedPop.alertRule?.fieldId)
+                            ? selectedPop.alertRule : undefined });
+                        setActiveEquipmentId(null);
+                      }}>Remover equipamento</Button>
+                    </>
+                  )}
+                </div>
+              ))}
+              {equipmentAddOpen && (
+                <div className="teif-editor-identity">
+                  <input style={inputStyle} value={newEquipmentName} maxLength={100}
+                    autoFocus aria-label="Nome do novo equipamento"
+                    placeholder="Nome: S6730, OLT, MikroTik..."
+                    onChange={e => setNewEquipmentName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && newEquipmentName.trim()) { addEquipment(selectedPop.id); setEquipmentAddOpen(false); } }} />
+                  <Button size="sm" variant="primary" disabled={!newEquipmentName.trim()}
+                    onClick={() => { addEquipment(selectedPop.id); setEquipmentAddOpen(false); }}>Salvar</Button>
+                </div>
+              )}
+            </div>
+            <details className="teif-editor-details">
+              <summary>Métricas gerais do POP ({selectedPop.monitoringFields?.length ?? 0})</summary>
             <MonitorFieldsEditor
               fields={selectedPop.monitoringFields ?? []}
               items={queryItems}
@@ -2007,10 +2179,10 @@ export const SimplePanel: React.FC<Props> = ({
               onChange={(fields) => updatePopMonitoringFields(selectedPop.id, fields)}
               enableWarningThresholds
             />
-            <div style={{ borderTop: '1px solid #405065', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <strong>Estado DOWN do POP (prioridade máxima)</strong>
-              <small>DOWN vermelho pulsante + X &gt; ATENÇÃO amarela &gt; NORMAL ciano.</small>
-              <small>O limite amarelo de CPU, memória, ping e outros itens é configurado em cada campo acima.</small>
+            </details>
+            <details className="teif-editor-details">
+              <summary>Regras de alerta do POP {selectedPop.alertRule ? '●' : ''}</summary>
+              <div className="teif-editor-details-body">
               <small>Campo de monitoramento que determina DOWN:</small>
               <select
                 style={inputStyle}
@@ -2024,7 +2196,7 @@ export const SimplePanel: React.FC<Props> = ({
                 }}
               >
                 <option value="">Sem regra DOWN</option>
-                {(selectedPop.monitoringFields ?? []).map((field) => (
+                {popFields(selectedPop).map((field) => (
                   <option key={field.id} value={field.id}>{field.name || 'Campo sem nome'}</option>
                 ))}
               </select>
@@ -2070,14 +2242,38 @@ export const SimplePanel: React.FC<Props> = ({
                   tone="warning"
                 />
               )}
-            </div>
+              </div>
+            </details>
+            <details className="teif-editor-details teif-editor-danger">
+              <summary>Excluir POP</summary>
+              <div className="teif-editor-details-body">
+                <small>Excluir este POP também remove seus enlaces conectados.</small>
+                {!confirmDelete ? (
+                  <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(true)}>Solicitar exclusão</Button>
+                ) : (
+                  <>
+                    <Button size="sm" variant="primary" onClick={excluirPop}>Confirmar exclusão</Button>
+                    <Button size="sm" variant="secondary" onClick={() => setConfirmDelete(false)}>Cancelar</Button>
+                  </>
+                )}
+              </div>
+            </details>
               </>
             ) : (
               <>
+                {(selectedPop.equipments ?? []).map(device => (
+                  <div key={device.id} style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: 7,
+                    border: '1px solid #405065', borderRadius: 5 }}>
+                    <strong>{device.name}</strong>
+                    {(device.monitoringFields?.length ?? 0) > 0 ?
+                      <MonitorFieldsReadout fields={device.monitoringFields ?? []} items={queryItems} /> :
+                      <small>Sem métricas configuradas</small>}
+                  </div>
+                ))}
                 {(selectedPop.monitoringFields?.length ?? 0) > 0 && (
                   <MonitorFieldsReadout fields={selectedPop.monitoringFields ?? []} items={queryItems} />
                 )}
-                {selectedPopReport && (selectedPop.alertRule || (selectedPop.monitoringFields ?? []).some((field) => field.warningRule)) && (
+                {selectedPopReport && (selectedPop.alertRule || popFields(selectedPop).some((field) => field.warningRule)) && (
                   <>
                     <small style={{ color: selectedPopReport.state === 'down' ? '#ff6675' : selectedPopReport.state === 'warning' ? '#facc15' : '#b5e4ff', fontWeight: 700 }}>
                       Estado: {({ down: 'DOWN', warning: 'ATENÇÃO', ok: 'Operacional', 'no-data': 'Sem dados', normal: 'Sem regra' } as const)[selectedPopReport.state]}
@@ -2100,7 +2296,7 @@ export const SimplePanel: React.FC<Props> = ({
               </>
             )}
 
-            {(() => {
+            {!editMode && (() => {
               const routes = routesConnectedToPop(selectedPop.id, importedRoutes, links);
               const connectedLinks = linksConnectedToPop(selectedPop.id, links);
               const linksKey = `pop:${selectedPop.id}:links`;
@@ -2158,22 +2354,17 @@ export const SimplePanel: React.FC<Props> = ({
             />
             {editMode ? (
               <>
-                <small>Nome do enlace</small>
-                <input
-                  style={inputStyle}
-                  maxLength={120}
-                  value={editLinkName}
-                  onChange={(event) => setEditLinkName(event.target.value)}
-                />
-                <Button
-                  size="sm"
-                  variant="primary"
-                  disabled={!editLinkName.trim()}
-                  onClick={() => updateLinkProperties(selectedLink.id, { name: editLinkName.trim() })}
-                >
-                  Salvar nome
-                </Button>
-                <small>Cor do enlace</small>
+                <div className="teif-editor-identity">
+                  <input style={inputStyle} maxLength={120} aria-label="Nome do enlace"
+                    value={editLinkName} onChange={event => setEditLinkName(event.target.value)}/>
+                  <Button size="sm" variant="primary" disabled={!editLinkName.trim() || editLinkName.trim() === selectedLink.name}
+                    onClick={() => updateLinkProperties(selectedLink.id, { name: editLinkName.trim() })}>Salvar nome</Button>
+                </div>
+                <small className="teif-muted">Estado: {({ normal: 'Não configurado', ok: 'UP', warning: 'ATENÇÃO', down: 'DOWN', 'no-data': 'Sem dados' } as const)[selectedLinkReport?.state ?? 'normal']}</small>
+                <details className="teif-editor-details">
+                  <summary>Aparência do enlace</summary>
+                  <div className="teif-editor-details-body">
+                  <small>Cor manual (apenas sem regra de estado)</small>
                 <input
                   type="color"
                   style={{ width: '100%', height: 32, cursor: 'pointer' }}
@@ -2188,8 +2379,11 @@ export const SimplePanel: React.FC<Props> = ({
                   value={selectedLink.width}
                   onChange={(event) => updateLinkProperties(selectedLink.id, { width: Number(event.target.value) })}
                 />
-                <div style={{ borderTop: '1px solid #405065', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <strong>Trajeto geográfico (KMZ/KML)</strong>
+                  </div>
+                </details>
+                <details className="teif-editor-details">
+                  <summary>Trajeto geográfico</summary>
+                  <div className="teif-editor-details-body">
                   <small>Uma rota selecionada substitui a linha reta, mantendo cores, thresholds e DOWN em todo o trajeto.</small>
                   <select
                     style={inputStyle}
@@ -2227,9 +2421,12 @@ export const SimplePanel: React.FC<Props> = ({
                       </Button>
                     </div>
                   )}
-                  <small>Os POPs continuam em suas posições originais. A geometria importada deve representar o cabo físico correspondente.</small>
-                </div>
+                  </div>
+                </details>
 
+                <details className="teif-editor-details">
+                  <summary>Métricas do enlace ({selectedLink.monitoringFields?.length ?? 0})</summary>
+                  <div className="teif-editor-details-body">
                 <MonitorFieldsEditor
                   fields={selectedLink.monitoringFields ?? []}
                   items={queryItems}
@@ -2237,11 +2434,11 @@ export const SimplePanel: React.FC<Props> = ({
                   onChange={(fields) => updateLinkProperties(selectedLink.id, { monitoringFields: fields })}
                   enableWarningThresholds
                 />
-                {/* Qual métrica efetivamente determina o estado visual deste enlace? */}
-                <div style={{ borderTop: '1px solid #405065', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <strong>Estado DOWN (prioridade máxima)</strong>
-                  <small>Prioridade: DOWN vermelho &gt; qualquer threshold amarelo &gt; cor normal.</small>
-                  <small>Configure os thresholds AMARELOS individualmente em cada campo de monitoramento acima.</small>
+                  </div>
+                </details>
+                <details className="teif-editor-details">
+                  <summary>Regras de alerta {selectedLink.alertRule ? '●' : ''}</summary>
+                  <div className="teif-editor-details-body">
                   <small>Campo de status que controla o vermelho pulsante e o X</small>
                   <select
                     style={inputStyle}
@@ -2308,7 +2505,11 @@ export const SimplePanel: React.FC<Props> = ({
                       tone="warning"
                     />
                   )}
-                </div>
+                  </div>
+                </details>
+                <details className="teif-editor-details teif-editor-danger">
+                  <summary>Excluir enlace</summary>
+                  <div className="teif-editor-details-body">
                 {!confirmDeleteLink ? (
                   <Button size="sm" variant="secondary" onClick={() => setConfirmDeleteLink(true)}>Excluir enlace</Button>
                 ) : (
@@ -2324,6 +2525,8 @@ export const SimplePanel: React.FC<Props> = ({
                     <Button size="sm" variant="secondary" onClick={() => setConfirmDeleteLink(false)}>Cancelar exclusão</Button>
                   </>
                 )}
+                  </div>
+                </details>
               </>
             ) : (
               <>
@@ -2370,23 +2573,6 @@ export const SimplePanel: React.FC<Props> = ({
           </div>
         )}
 
-        {/* CONTADORES */}
-        {editMode && (
-          <div
-            style={{
-              ...cardStyle,
-              width: 'auto',
-              padding: '6px 10px',
-              flexShrink: 0,
-            }}
-          >
-            <small>
-              POPs: {pops.length}
-              {' | '}
-              Enlaces: {links.length}
-            </small>
-          </div>
-        )}
       </div>
     </div>
   );
