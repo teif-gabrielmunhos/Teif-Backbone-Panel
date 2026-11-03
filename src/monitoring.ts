@@ -1,6 +1,6 @@
 import { FieldType } from '@grafana/data';
 import type { DataFrame, Field, PanelData } from '@grafana/data';
-import type { MonitorField, MonitorUnit, LinkAlertRule, PopAlertRule, FieldWarningRule } from './types';
+import type { MonitorField, MonitorUnit, LinkAlertRule, PopAlertRule, FieldWarningRule, BackbonePop } from './types';
 
 /**
  * Faz a ponte entre os campos de monitoramento e o resultado real das queries.
@@ -275,6 +275,29 @@ export function popHealthReport(
   available: QueryItem[]
 ): LinkHealthReport {
   return linkHealthReport(downRule, fields, available);
+}
+
+/** Consolida equipamentos sem transformar ausência de dados em indisponibilidade.
+ * Regras por equipamento contam para o estado do POP; estado DOWN > ATENÇÃO > SEM DADOS > UP.
+ * Métricas legadas do POP continuam válidas e dados novos são opcionais.
+ */
+export function popEquipmentHealthReport(pop: BackbonePop, available: QueryItem[]): LinkHealthReport {
+  const allFields = [...(pop.monitoringFields ?? []),
+    ...(pop.equipments ?? []).flatMap(device => device.monitoringFields ?? [])];
+  const main = popHealthReport(pop.alertRule, allFields, available);
+  const devices = (pop.equipments ?? []).map(device =>
+    popHealthReport(device.alertRule, device.monitoringFields ?? [], available));
+  const reports = [main, ...devices];
+  const priority: Record<LinkHealthState, number> = {
+    down: 0, warning: 1, 'no-data': 2, ok: 3, normal: 4,
+  };
+  const state = reports.map(report => report.state).sort((a, b) => priority[a] - priority[b])[0];
+  return {
+    state,
+    downReason: reports.find(report => report.state === 'down')?.downReason,
+    // As regras de atenção já foram avaliadas em 'main' sobre todas as métricas.
+    warningReasons: main.warningReasons,
+  };
 }
 
 /** Compatibilidade com a v0.8: retorna somente a cor/estado. */

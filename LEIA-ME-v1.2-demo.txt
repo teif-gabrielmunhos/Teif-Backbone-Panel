@@ -1,0 +1,66 @@
+# Teif Backbone Panel — v1.2 Demonstração integrada
+
+**Base:** pacote etapa 2 + correção visual + fibra clicável.
+**Objetivo:** NOC com mapa livre, trilho vertical e alertas em um ícone de exclamação.
+
+## Novidades
+
+- Barra **vertical compacta** à direita, recolhida por padrão.
+- Botão **!**: lista apenas alarmes DOWN/ATENÇÃO detectados pelas regras atuais do Zabbix. Contador indica o número de ocorrências. Sem regras não significa UP.
+- Botão **◎**: contagem de POPs, enlaces, geometrias e estados (OK, DOWN, Atenção, Sem dados, Não configurado).
+- Botão de busca: procura POP/enlace e aproxima o mapa ao selecioná-lo.
+- Botão camadas: abre os controles já existentes, sem duplicar edição.
+- Alternância **NOC / Projeto**: NOC com apenas comandos essenciais; Projeto com editor já existente.
+- Alternância Ruas / Satélite (serviço Esri exige acesso de rede e respeito aos termos do fornecedor).
+- Manutenção do clique em fibra: realce, inspector, associação manual de segmentos a enlaces e configuração do monitoramento.
+- Preserva o renderizador com violeta backbone, laranja FTTH, cinza outros.
+
+## Instalação — SOMENTE desenvolvimento
+
+1. Copie `teif_v12_demo_integrada.zip` para a pasta do plugin no WSL.
+2. Confira que está na branch `feature/kmz-camadas-v12`, com alterações registradas ou salvas em backup.
+3. Faça backup:
+
+```bash
+tar -czf ~/teif-v12-antes-demo.tar.gz src package.json
+```
+
+4. Extraia com os arquivos do projeto:
+
+```bash
+unzip -o teif_v12_demo_integrada.zip -d .
+npm run typecheck
+npm run build
+mkdir -p dist/maps
+cp maps/teif-projeto-completo.geojson dist/maps/
+```
+
+**Importante:** o ZIP contém somente `src/`, não contém mapa nem dependências. O GeoJSON deve permanecer em `maps/` e ser copiado para `dist/maps/` após cada `npm run build`.
+
+5. Teste no Grafana de desenvolvimento e atualize com Ctrl+Shift+R.
+6. Mantenha a v1.1 do Grafana operacional sem alterações.
+
+## Como testar
+
+- Em **NOC**, procure a barra vertical à direita. Clique no **!**; inicialmente, se os POPs ainda não têm query/regras, o correto é *Nenhum alarme ativo confirmado*.
+- Clique em **◎** para verificar contadores; 9 POPs, 0 enlaces e 9.766 geometrias são possíveis se o painel estiver com o cadastro e o arquivo anteriores.
+- Clique em **Buscar**, localize um POP e selecione; o mapa aproxima sua posição.
+- Clique em **Camadas** e filtre as rotas.
+- Mude para **Projeto**, ative edição e clique em uma linha violeta. Teste adicionar um ou mais trechos geográficos a um enlace e vincular itens do Zabbix.
+- Teste Ruas/Satélite (servidor precisa acessar os tiles), salvar e atualizar o dashboard, verificar persistência.
+
+## Rollback rápido
+
+```bash
+tar -xzf ~/teif-v12-antes-demo.tar.gz
+npm run typecheck && npm run build
+mkdir -p dist/maps
+cp maps/teif-projeto-completo.geojson dist/maps/
+```
+
+## Limites desta versão
+
+- Não há integração em tempo real com a API de eventos Zabbix: os alarmes usam regras de monitoramento existentes e valores das queries recebidas pelo Grafana.
+- O fundo satélite depende de terceiros (Esri).
+- Não houve execução do build completo neste ambiente; valide no seu WSL com as dependências originais.
+- Upload de KMZ completo continua usando GeoJSON externo por desempenho.

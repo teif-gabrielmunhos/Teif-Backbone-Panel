@@ -1,0 +1,39 @@
+/* Teif v1.2 — editor compacto; não modifica os estilos operacionais do NOC. */
+.teif-edit-entry { pointer-events:auto; align-self:flex-end; border:1px solid #3b526b;
+  background:rgba(15,23,42,.96);padding:5px;border-radius:8px;
+  box-shadow:0 4px 18px #0008; flex-shrink:0; }
+.teif-edit-rail { pointer-events:auto; position:relative; display:flex; flex-direction:column;
+  align-self:flex-end; gap:3px; width:63px; padding:5px; box-sizing:border-box;
+  border:1px solid #40546c;border-radius:9px;background:rgba(15,23,42,.97);
+  box-shadow:0 6px 18px #0009; flex-shrink:0; }
+.teif-edit-tool { color:#dbe9fb; background:transparent; border:1px solid transparent;
+  border-radius:6px; min-height:58px; padding:4px 1px; cursor:pointer; display:flex;
+  flex-direction:column; align-items:center; justify-content:center; gap:2px;
+  font:500 10px/1.25 Inter, sans-serif; }
+.teif-edit-tool:hover,.teif-edit-tool.is-active { background:#203b58; border-color:#3e81d4; }
+.teif-edit-tool:disabled { opacity:.35;cursor:not-allowed; }
+.teif-edit-symbol {font-size:22px;line-height:1.1;font-weight:600; }
+.teif-edit-more {border-top:1px solid #314157; padding-top:3px; text-align:center; }
+.teif-edit-more > summary { cursor:pointer; list-style:none; color:#a8bcd0;
+ font-weight:700; line-height:26px; }
+.teif-edit-more > summary::-webkit-details-marker { display:none; }
+.teif-edit-more-menu {position:absolute;top:100%;right:0;width:150px;
+  border:1px solid #40546c;background:#111e2f;border-radius:5px;padding:6px;z-index:2100; }
+.teif-edit-more-menu button {width:100%;border:0;background:transparent;color:#e0eafb;
+  cursor:pointer;text-align:left;padding:8px;font:inherit; }
+.teif-edit-more-menu button:hover {background:#28425e;}
+.teif-monitor-editor { scrollbar-width:thin;scrollbar-color:#4c6988 transparent; }
+.teif-editor-identity { display:flex;gap:6px;min-width:0;align-items:center; }
+.teif-editor-identity input {flex:1;min-width:0;}
+.teif-editor-identity button {white-space:nowrap;flex-shrink:0;}
+.teif-muted {color:#aabbd0; font-size:11px;}
+.teif-editor-section-head {display:flex;justify-content:space-between;align-items:center;
+  flex-wrap:wrap;gap:6px;}
+.teif-editor-details {border-top:1px solid #36475d;padding:5px 0 0; }
+.teif-editor-details > summary { padding:7px 2px;cursor:pointer;color:#d6e6fa;font-size:12px;
+  font-weight:600;list-style-position:inside; }
+.teif-editor-details[open] > summary {color:#9ed5ff;}
+.teif-editor-details-body { display:flex; flex-direction:column;gap:7px;padding:6px 0 10px; }
+.teif-editor-details-body > * {min-width:0;}
+.teif-editor-danger {margin-top:4px;}
+.teif-editor-danger > summary {color:#ec9ca4;}

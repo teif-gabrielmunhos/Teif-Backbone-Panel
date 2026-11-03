@@ -175,10 +175,12 @@ export const KmzManager: React.FC<KmzManagerProps> = (props) => {
   return (
     <>
       <strong>Gerenciar KMZ/KML</strong>
-      <small>Converta os pontos do Google Earth em POPs com monitoramento e associe as extremidades de cada rota.</small>
       <Button size="sm" variant="primary" disabled={props.loading} onClick={props.onImport}>
         {props.loading ? 'Importando...' : 'Selecionar arquivo KMZ/KML'}
       </Button>
+      <details className="teif-editor-details">
+        <summary>Camadas e visibilidade</summary>
+        <div className="teif-editor-details-body">
       <label style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12 }}>
         <input type="checkbox" checked={props.showPreview} onChange={e => props.onTogglePreview(e.target.checked)}/>
         Mostrar rotas não vinculadas e pontos de referência
@@ -221,6 +223,8 @@ export const KmzManager: React.FC<KmzManagerProps> = (props) => {
           Enquadrar projeto GeoJSON no mapa
         </Button>
       )}
+        </div>
+      </details>
       {!!props.message && <small style={{ color: props.message.startsWith('Erro') ? '#ff7b8c' : '#b9e8ff', overflowWrap: 'anywhere' }}>{props.message}</small>}
       <div style={{ display: 'flex', gap: 6 }}>
         <Button size="sm" variant={tab === 'waypoints' ? 'primary' : 'secondary'} onClick={() => { setTab('waypoints'); setSearch(''); }}>
@@ -245,7 +249,8 @@ export const KmzManager: React.FC<KmzManagerProps> = (props) => {
         <>
           <small>POPs vinculados: {linkedCount}/{props.waypoints.length}. Clique na seta de um ponto para renomear ou converter.</small>
           {waypoints.length === 0 && <small>Nenhum ponto encontrado.</small>}
-          {waypoints.map(point => <WaypointRow key={point.id} point={point} pops={props.pops}
+          {waypoints.length > 80 && <small>Exibindo os primeiros 80 de {waypoints.length} pontos. Pesquise pelo nome para encontrar outros.</small>}
+          {waypoints.slice(0, 80).map(point => <WaypointRow key={point.id} point={point} pops={props.pops}
             occupiedPopIds={occupiedPopIds} onRename={props.onRenameWaypoint} onCreatePop={props.onCreatePop}
             onAssociate={props.onAssociateWaypoint} onDisassociate={props.onDisassociateWaypoint}
             onLocate={props.onLocateWaypoint} />)}
@@ -257,7 +262,8 @@ export const KmzManager: React.FC<KmzManagerProps> = (props) => {
         <>
           <small>Associe origem e destino às rotas para listá-las nos POPs. Fibras monitoradas também aparecem pelo vínculo com seus enlaces.</small>
           {routes.length === 0 && <small>Nenhuma rota encontrada.</small>}
-          {routes.map(route => <RouteRow key={route.id} route={route} pops={props.pops}
+          {routes.length > 80 && <small>Exibindo as primeiras 80 de {routes.length} rotas. Pesquise para refinar.</small>}
+          {routes.slice(0, 80).map(route => <RouteRow key={route.id} route={route} pops={props.pops}
             usedLinks={props.links.filter(link => link.routeId === route.id)}
             onUpdate={props.onUpdateRoute} onRemove={props.onRemoveRoute} onLocate={props.onLocateRoute}/>)}
         </>

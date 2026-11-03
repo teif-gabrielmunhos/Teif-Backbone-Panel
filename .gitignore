@@ -67,3 +67,8 @@ maps/
 # Configuracoes locais de assistentes
 .claude/
 .codex/
+
+# Pacotes e backups locais
+*.zip
+*:Zone.Identifier
+*.backup-*

@@ -40,8 +40,8 @@ export function criarCamadaGeoJson(item: FeatureIndexada, renderer: L.Renderer):
   // Reservamos verde/amarelo/vermelho para os enlaces monitorados.
   const isLine = g.type === 'LineString' || g.type === 'MultiLineString';
   const color = item.tipoPonto === 'pop' ? '#0ba67d' : item.tipoPonto === 'hub' ? '#37a2fb' :
-    item.categoria === 'backbone' ? '#6129B6' : // violeta: distinto de rios/vegetação
-    item.categoria === 'ftth' ? '#B45309' :     // laranja queimado: rede de acesso
+    item.categoria === 'backbone' ? '#8B5CF6' : // violeta: distinto de rios/vegetação
+    item.categoria === 'ftth' ? '#D97706' :     // laranja queimado: rede de acesso
     '#667085';                                // ardósia: infraestrutura secundária
   const style: L.PolylineOptions = {
     renderer,
