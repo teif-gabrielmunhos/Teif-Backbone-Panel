@@ -2028,7 +2028,7 @@ export const SimplePanel: React.FC<Props> = ({
               </Button>
             </div>
             <label style={{ fontSize: 12 }}>Nome do POP</label>
-            <input style={inputStyle} placeholder="Ex.: Nome do POP" maxLength={80}
+            <input style={inputStyle} placeholder="" maxLength={80}
               value={newName} onChange={(event) => setNewName(event.target.value)} />
             <label style={{ fontSize: 12 }} htmlFor="teif-new-pop-icon">Ícone do POP</label>
             <select id="teif-new-pop-icon" style={inputStyle} value={newPopIcon}
@@ -2120,7 +2120,7 @@ export const SimplePanel: React.FC<Props> = ({
                       <input style={inputStyle} value={device.name} maxLength={100}
                         onChange={e => updateEquipment(selectedPop.id, device.id, { name: e.target.value })} />
                       <label style={{ fontSize: 12 }}>Host no Zabbix (identificador informativo)</label>
-                      <input style={inputStyle} value={device.hostName ?? ''} placeholder="Ex.: POP_CENTRO_S6730"
+                      <input style={inputStyle} value={device.hostName ?? ''} placeholder=""
                         onChange={e => updateEquipment(selectedPop.id, device.id, { hostName: e.target.value })} />
                       <MonitorFieldsEditor fields={device.monitoringFields ?? []} items={queryItems} queryIds={queryIds}
                         onChange={fields => updateEquipment(selectedPop.id, device.id, { monitoringFields: fields })}

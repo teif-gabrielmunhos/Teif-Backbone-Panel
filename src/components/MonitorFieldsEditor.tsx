@@ -184,7 +184,7 @@ export const MonitorFieldsEditor: React.FC<Props> = ({ fields, queryIds, items, 
                     <input
                       style={inputStyle}
                       value={field.warningRule.value}
-                      placeholder="Ex.: 1000000000, 75 ou 100"
+                      placeholder=""
                       onChange={(event) => changeOne(field.id, {
                         warningRule: { ...field.warningRule!, value: event.target.value },
                       })}
