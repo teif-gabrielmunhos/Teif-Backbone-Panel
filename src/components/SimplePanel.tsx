@@ -2028,7 +2028,7 @@ export const SimplePanel: React.FC<Props> = ({
               </Button>
             </div>
             <label style={{ fontSize: 12 }}>Nome do POP</label>
-            <input style={inputStyle} placeholder="Ex.: ITA_G5" maxLength={80}
+            <input style={inputStyle} placeholder="Ex.: Nome do POP" maxLength={80}
               value={newName} onChange={(event) => setNewName(event.target.value)} />
             <label style={{ fontSize: 12 }} htmlFor="teif-new-pop-icon">Ícone do POP</label>
             <select id="teif-new-pop-icon" style={inputStyle} value={newPopIcon}
