@@ -1,0 +1,20 @@
+/* Tooltip escuro e não interativo: mantém hover e clique no enlace do Leaflet. */
+.leaflet-tooltip.teif-link-traffic-tooltip {
+  border: 1px solid #41546e;
+  border-radius: 8px;
+  background: #101b2b;
+  color: #e2e8f0;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .55);
+  padding: 10px 12px;
+  max-width: min(410px, calc(100vw - 28px));
+  pointer-events: none;
+}
+.leaflet-tooltip.teif-link-traffic-tooltip::before { border-top-color: #41546e; border-bottom-color: #41546e; }
+.teif-traffic-card { width: min(360px, calc(100vw - 60px)); font: 12px/1.4 Arial, sans-serif; white-space: normal; }
+.teif-traffic-title { font-size: 12px; font-weight: 700; margin-bottom: 8px; overflow-wrap: anywhere; }
+.teif-traffic-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 7px; }
+.teif-traffic-legend-item { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.teif-traffic-legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.teif-traffic-svg { display: block; width: 100%; height: auto; }
+.teif-traffic-caption { color: #aebed2; font-size: 10px; margin-top: 2px; }
+.teif-traffic-note, .teif-traffic-empty { color: #c0cad7; font-size: 11px; padding: 6px 0; }

@@ -14,8 +14,10 @@ import { criarCamadaGeoJson, segmentosDeFibraGeoJson } from '../geo/renderer';
 import { linksConnectedToPop, nearbyPop, routesConnectedToPop } from '../kmzAssociations';
 import type { AlertOperator, LinkAlertRule, MonitorField, PopAlertRule, PopEquipment, MapLatLng, PopMarkerIcon, LinkTechnology } from '../types';
 import * as L from 'leaflet';
+import { createLinkTrafficTooltip } from '../trafficTooltip';
 import 'leaflet/dist/leaflet.css';
 import './linkStatus.css';
+import '../trafficTooltip.css';
 import './popStatus.css';
 import './popIcons.css';
 import './editorLayout.css';
@@ -1252,7 +1254,10 @@ export const SimplePanel: React.FC<Props> = ({
         interactive: true,
         bubblingMouseEvents: false,
       }).addTo(group);
-      hitLine.bindTooltip(label, { sticky: true });
+      // DOM do gráfico é construído sob demanda apenas ao abrir o tooltip.
+      hitLine.bindTooltip(() => createLinkTrafficTooltip(link, queryItems, data.series, label.textContent ?? ''), {
+        sticky: true, direction: 'auto', opacity: 1, className: 'teif-link-traffic-tooltip', interactive: false,
+      });
       hitLine.on('click', () => {
         if (adding || creatingLink) { return; }
         setNavigationHistory([]);
@@ -2446,6 +2451,36 @@ export const SimplePanel: React.FC<Props> = ({
                   onChange={(fields) => updateLinkProperties(selectedLink.id, { monitoringFields: fields })}
                   enableWarningThresholds
                 />
+                  </div>
+                </details>
+                <details className="teif-editor-details">
+                  <summary>Gráfico no tooltip (Download / Upload)</summary>
+                  <div className="teif-editor-details-body">
+                    <small>Ao passar o mouse sobre o enlace, exibe as séries temporais recebidas pelas queries do Grafana.
+                      Configure abaixo os campos de Download e Upload já cadastrados em Métricas do enlace.
+                      Sem seleção, o plugin tenta reconhecer RX/Download e TX/Upload pelo nome.</small>
+                    <label style={{ fontSize: 12 }}>Download (RX)</label>
+                    <select style={inputStyle} value={selectedLink.trafficTooltip?.downloadFieldId ?? ''}
+                      onChange={(event) => updateLinkProperties(selectedLink.id, {
+                        trafficTooltip: { ...selectedLink.trafficTooltip, downloadFieldId: event.target.value || undefined },
+                      })}>
+                      <option value="">Automático (RX / Download)</option>
+                      {(selectedLink.monitoringFields ?? []).map(field => (
+                        <option key={field.id} value={field.id}>{field.name || 'Campo sem nome'}</option>
+                      ))}
+                    </select>
+                    <label style={{ fontSize: 12 }}>Upload (TX)</label>
+                    <select style={inputStyle} value={selectedLink.trafficTooltip?.uploadFieldId ?? ''}
+                      onChange={(event) => updateLinkProperties(selectedLink.id, {
+                        trafficTooltip: { ...selectedLink.trafficTooltip, uploadFieldId: event.target.value || undefined },
+                      })}>
+                      <option value="">Automático (TX / Upload)</option>
+                      {(selectedLink.monitoringFields ?? []).map(field => (
+                        <option key={field.id} value={field.id}>{field.name || 'Campo sem nome'}</option>
+                      ))}
+                    </select>
+                    <small>O histórico exibido corresponde ao intervalo de tempo do dashboard. A query precisa retornar
+                      valores históricos com timestamps (Time series), e não apenas uma leitura instantânea.</small>
                   </div>
                 </details>
                 <details className="teif-editor-details">

@@ -113,6 +113,8 @@ export interface BackboneLink {
   width: number;
   /** Meio físico. Omitido = fibra para painéis anteriores. */
   technology?: LinkTechnology;
+  /** Duas métricas exibidas no mini-gráfico de tráfego ao passar o mouse. */
+  trafficTooltip?: { downloadFieldId?: string; uploadFieldId?: string };
   /** Quando definido, desenha o trajeto importado em vez da linha reta. */
   routeId?: string;
   /** Referência(s) ao GeoJSON externo. Os trechos permanecem no arquivo, não no JSON do dashboard. */
