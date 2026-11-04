@@ -37,6 +37,56 @@ type Props = PanelProps<SimpleOptions>;
 // Navegação local: permite voltar pelo mesmo caminho, sem gravar nada no dashboard.
 type NavigationEntry = { kind: 'pop' | 'link'; id: string };
 
+// Guias inteligentes: compara posições projetadas em pixels, não graus.
+// Só o arraste de POPs no editor usa esses cálculos; não altera métricas ou KMZ.
+type SmartGuideSnap = { x?: number; y?: number };
+const SMART_GUIDE_TOLERANCE_PX = 10;
+
+function findSmartGuideSnap(
+  map: L.Map, position: L.LatLng, movingId: string, pops: BackbonePop[]
+): SmartGuideSnap {
+  const moving = map.latLngToContainerPoint(position);
+  let dx = SMART_GUIDE_TOLERANCE_PX + 1;
+  let dy = SMART_GUIDE_TOLERANCE_PX + 1;
+  const snap: SmartGuideSnap = {};
+  for (const other of pops) {
+    if (other.id === movingId) { continue; }
+    const point = map.latLngToContainerPoint([other.latitude, other.longitude]);
+    const differenceX = Math.abs(moving.x - point.x);
+    const differenceY = Math.abs(moving.y - point.y);
+    if (differenceX <= SMART_GUIDE_TOLERANCE_PX && differenceX < dx) {
+      snap.x = point.x;
+      dx = differenceX;
+    }
+    if (differenceY <= SMART_GUIDE_TOLERANCE_PX && differenceY < dy) {
+      snap.y = point.y;
+      dy = differenceY;
+    }
+  }
+  return snap;
+}
+
+function drawSmartGuideLines(map: L.Map, group: L.LayerGroup, snap: SmartGuideSnap): void {
+  group.clearLayers();
+  const size = map.getSize();
+  const lineStyle: L.PolylineOptions = {
+    color: '#ffffff', weight: 2, opacity: 0.95, dashArray: '5 6', interactive: false,
+  };
+  if (snap.x !== undefined) {
+    L.polyline([
+      map.containerPointToLatLng(L.point(snap.x, 0)),
+      map.containerPointToLatLng(L.point(snap.x, size.y)),
+    ], lineStyle).addTo(group);
+  }
+  if (snap.y !== undefined) {
+    L.polyline([
+      map.containerPointToLatLng(L.point(0, snap.y)),
+      map.containerPointToLatLng(L.point(size.x, snap.y)),
+    ], lineStyle).addTo(group);
+  }
+}
+
+
 // ========================================
 // CONFIGURAÇÕES INICIAIS
 // ========================================
@@ -321,6 +371,7 @@ export const SimplePanel: React.FC<Props> = ({
   const baseTileRef = useRef<L.TileLayer | null>(null);
 
   const markersRef = useRef<L.LayerGroup | null>(null);
+  const smartGuidesRef = useRef<L.LayerGroup | null>(null);
   const linksRef = useRef<L.LayerGroup | null>(null);
   const kmzPreviewRef = useRef<L.LayerGroup | null>(null);
   const externalGeojsonRef = useRef<L.LayerGroup | null>(null);
@@ -370,6 +421,7 @@ export const SimplePanel: React.FC<Props> = ({
   // ======================================
 
   const [editMode, setEditMode] = useState(false);
+  const [smartGuides, setSmartGuides] = useState(true);
   // Preferências de apresentação são locais: não sobrescrevem o JSON do dashboard.
   const [viewMode, setViewMode] = useState<'noc' | 'projeto'>('noc');
   const baseMap = options.defaultBaseMap ?? 'escuro';
@@ -889,6 +941,8 @@ export const SimplePanel: React.FC<Props> = ({
 
     // Camada dos POPs
     const markerGroup = L.layerGroup().addTo(map);
+    // Camada temporária das linhas de referência, acima dos enlaces e POPs.
+    const smartGuideGroup = L.layerGroup().addTo(map);
 
     // Guardar referências
     mapRef.current = map;
@@ -897,6 +951,7 @@ export const SimplePanel: React.FC<Props> = ({
     externalGeojsonRef.current = externalGeojsonGroup;
     externalHighlightRef.current = externalHighlightGroup;
     markersRef.current = markerGroup;
+    smartGuidesRef.current = smartGuideGroup;
 
     const frame = requestAnimationFrame(() => {
       map.invalidateSize();
@@ -911,6 +966,7 @@ export const SimplePanel: React.FC<Props> = ({
       mapRef.current = null;
       baseTileRef.current = null;
       markersRef.current = null;
+      smartGuidesRef.current = null;
       linksRef.current = null;
       drawLayerRef.current = null;
       kmzPreviewRef.current = null;
@@ -1336,6 +1392,13 @@ export const SimplePanel: React.FC<Props> = ({
     setLinkCreateMessage('');
   };
 
+  // Se sair do modo edição ou desligar guias, remove as linhas temporárias.
+  useEffect(() => {
+    if (!editMode || !smartGuides) {
+      smartGuidesRef.current?.clearLayers();
+    }
+  }, [editMode, smartGuides]);
+
   // ======================================
   // 5. DESENHAR POPs
   // ======================================
@@ -1402,13 +1465,38 @@ export const SimplePanel: React.FC<Props> = ({
       // MOVIMENTAR POP
       // ==================================
 
+      // Linhas-guia surgem durante o movimento e desaparecem ao soltar.
+      marker.on('dragstart', () => {
+        smartGuidesRef.current?.clearLayers();
+      });
+      marker.on('drag', () => {
+        const currentMap = mapRef.current;
+        const guideGroup = smartGuidesRef.current;
+        if (!smartGuides || !currentMap || !guideGroup || !editMode || creatingLink) { return; }
+        const snap = findSmartGuideSnap(
+          currentMap, marker.getLatLng(), pop.id, optionsRef.current.pops ?? []
+        );
+        drawSmartGuideLines(currentMap, guideGroup, snap);
+      });
+
       marker.on('dragend', () => {
         if (!editMode || creatingLink) {
           return;
         }
 
-        const point = marker.getLatLng();
+        let point = marker.getLatLng();
         const current = optionsRef.current;
+        const currentMap = mapRef.current;
+        // Snap apenas ao soltar: evita saltos/jitter durante o arraste Leaflet.
+        if (smartGuides && currentMap) {
+          const snap = findSmartGuideSnap(currentMap, point, pop.id, current.pops ?? []);
+          if (snap.x !== undefined || snap.y !== undefined) {
+            const pixel = currentMap.latLngToContainerPoint(point);
+            point = currentMap.containerPointToLatLng(L.point(snap.x ?? pixel.x, snap.y ?? pixel.y));
+            marker.setLatLng(point);
+          }
+        }
+        smartGuidesRef.current?.clearLayers();
 
         const updated = (current.pops ?? []).map(
           (item) =>
@@ -1435,6 +1523,7 @@ export const SimplePanel: React.FC<Props> = ({
     options.pops,
     editMode,
     creatingLink,
+    smartGuides,
     linkOriginId,
     linkRouteId,
     linkCreationMethod,
@@ -1793,6 +1882,13 @@ export const SimplePanel: React.FC<Props> = ({
                 setSelectedId(null); setSelectedLinkId(null); setSelectedExternalId(null);
               }}>
               <span className="teif-edit-symbol" aria-hidden="true">▱</span><span>Rotas</span>
+            </button>
+            <button type="button" className={`teif-edit-tool ${smartGuides ? 'is-active' : ''}`}
+              aria-label={smartGuides ? 'Desativar guias inteligentes' : 'Ativar guias inteligentes'}
+              title={smartGuides ? 'Guias inteligentes: ativadas' : 'Guias inteligentes: desativadas'}
+              aria-pressed={smartGuides}
+              onClick={() => setSmartGuides((enabled) => !enabled)}>
+              <span className="teif-edit-symbol" aria-hidden="true">⊞</span><span>Guias</span>
             </button>
             <details className="teif-edit-more">
               <summary aria-label="Outras ações" title="Outras ações">···</summary>
