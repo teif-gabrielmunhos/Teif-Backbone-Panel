@@ -148,15 +148,15 @@ export function createLinkTrafficTooltip(link: BackboneLink, items: QueryItem[],
 
   const downloadField = chooseField(link, 'download', items);
   const uploadField = chooseField(link, 'upload', items);
-  const download = extract(downloadField, items, frames, '#38bdf8', 'Download');
-  const upload = extract(uploadField, items, frames, '#fbbf24', 'Upload');
+  const download = extract(downloadField, items, frames, '#22c55e', 'Download');
+  const upload = extract(uploadField, items, frames, '#38bdf8', 'Upload');
   if (!download && !upload) {
     root.appendChild(el('div', 'teif-traffic-note', 'Configure os campos Download e Upload nas métricas do enlace.'));
     return root;
   }
 
   const legend = el('div', 'teif-traffic-legend');
-  for (const [line, name, color] of [[download, 'Download', '#38bdf8'], [upload, 'Upload', '#fbbf24']] as const) {
+  for (const [line, name, color] of [[download, 'Download', '#22c55e'], [upload, 'Upload', '#38bdf8']] as const) {  
     const label = el('span', 'teif-traffic-legend-item');
     const dot = el('i', 'teif-traffic-legend-dot');
     dot.style.backgroundColor = color;
@@ -187,7 +187,7 @@ export function createLinkTrafficTooltip(link: BackboneLink, items: QueryItem[],
     root.appendChild(el('div', 'teif-traffic-empty', 'Ainda não há pontos suficientes para desenhar o histórico.'));
     return root;
   }
-  const W = 360, H = 168, left = 55, right = 8, top = 12, bottom = 27;
+  const W = 360, H = 168, left = 85, right = 12, top = 12, bottom = 27;
   const iw = W - left - right, ih = H - top - bottom;
   const px = (t: number) => left + ((t - xmin) / (xmax - xmin)) * iw;
   const py = (v: number) => top + ih * (1 - Math.max(0, v) / ymax);
