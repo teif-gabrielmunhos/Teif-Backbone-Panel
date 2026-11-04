@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button } from '@grafana/ui';
+import { Button, Select } from '@grafana/ui';
 import type { AlertOperator, MonitorField, MonitorUnit } from '../types';
 import type { QueryItem } from '../monitoring';
 import { evaluateMonitorRule, metricValue } from '../monitoring';
@@ -132,11 +132,23 @@ export const MonitorFieldsEditor: React.FC<Props> = ({ fields, queryIds, items, 
             </div>
             <div>
               <label style={labelStyle}>Item / série retornado pela query</label>
-              <select style={inputStyle} value={field.itemKey} disabled={!field.queryRefId || matchingItems.length === 0} onChange={(e) => changeOne(field.id, { itemKey: e.target.value })}>
-                <option value="">Selecione o item</option>
-                {matchingItems.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
-                {field.itemKey && !chosenItemExists && <option value={field.itemKey}>Item anteriormente selecionado (indisponível)</option>}
-              </select>
+              <Select<string>
+                options={[
+                  ...matchingItems.map((item) => ({ value: item.key, label: item.label })),
+                  ...(field.itemKey && !chosenItemExists
+                    ? [{ value: field.itemKey, label: 'Item anteriormente selecionado (indisponível)' }]
+                    : []),
+                ]}
+                value={field.itemKey
+                  ? { value: field.itemKey, label: matchingItems.find((item) => item.key === field.itemKey)?.label
+                      ?? 'Item anteriormente selecionado (indisponível)' }
+                  : undefined}
+                disabled={!field.queryRefId || matchingItems.length === 0}
+                isSearchable={true}
+                virtualized={true}
+                placeholder="Digite para buscar a interface ou item..."
+                onChange={(selection) => changeOne(field.id, { itemKey: selection?.value ?? '' })}
+              />
             </div>
             <div>
               <label style={labelStyle}>Unidade</label>

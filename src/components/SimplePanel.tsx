@@ -12,7 +12,7 @@ import { camadaVisivel, candidatosGeojson, criarIndiceCamadas, definirConfigurac
 import type { FeatureIndexada, GeoJSONDaRede } from '../geo/layers';
 import { criarCamadaGeoJson, segmentosDeFibraGeoJson } from '../geo/renderer';
 import { linksConnectedToPop, nearbyPop, routesConnectedToPop } from '../kmzAssociations';
-import type { AlertOperator, LinkAlertRule, MonitorField, PopAlertRule, PopEquipment, MapLatLng, PopMarkerIcon } from '../types';
+import type { AlertOperator, LinkAlertRule, MonitorField, PopAlertRule, PopEquipment, MapLatLng, PopMarkerIcon, LinkTechnology } from '../types';
 import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './linkStatus.css';
@@ -431,6 +431,7 @@ export const SimplePanel: React.FC<Props> = ({
   const [linkRouteId, setLinkRouteId] = useState('');
   const [linkCreateMessage, setLinkCreateMessage] = useState('');
   const [linkCreationMethod, setLinkCreationMethod] = useState<'pops' | 'draw'>('pops');
+  const [newLinkTechnology, setNewLinkTechnology] = useState<LinkTechnology>('fibra');
   const [drawPoints, setDrawPoints] = useState<MapLatLng[]>([]);
   const drawLayerRef = useRef<L.LayerGroup | null>(null);
 
@@ -1207,11 +1208,12 @@ export const SimplePanel: React.FC<Props> = ({
       const report = linkHealthReport(link.alertRule, link.monitoringFields ?? [], queryItems);
       const state = report.state;
       const weight = Math.max(1, Math.min(16, (link.width || 4) * (options.linkWidthScale ?? 1)));
+      const lineDashArray = link.technology === 'radio' ? '7 8' : undefined;
 
       // Contorno escuro fixo durante o alerta: cabo NUNCA desaparece no pulso.
       if (state === 'down' || state === 'warning') {
         L.polyline(points, {
-          color: state === 'down' ? '#4d111a' : '#665012', weight: weight + 4, opacity: 1, interactive: false,
+          color: state === 'down' ? '#4d111a' : '#665012', weight: weight + 4, dashArray: lineDashArray, opacity: 1, interactive: false,
         }).addTo(group);
       }
 
@@ -1219,7 +1221,7 @@ export const SimplePanel: React.FC<Props> = ({
         color: state === 'down' ? '#ef4444' : state === 'warning' ? '#facc15' : state === 'ok' ? '#22c55e' : '#94a3b8',
         weight,
         opacity: state === 'down' || state === 'warning' ? 1 : 0.9,
-        dashArray: state === 'no-data' || state === 'normal' ? '8 7' : undefined,
+        dashArray: lineDashArray,
         className: state === 'down' && (options.pulseDownLinks ?? true) ? 'teif-link-alert-stroke' : undefined,
         interactive: false,
       }).addTo(group);
@@ -1284,6 +1286,7 @@ export const SimplePanel: React.FC<Props> = ({
       targetPopId: destination.id,
       color: '#00FF66',
       width: 4,
+      technology: newLinkTechnology,
       routeId: (current.importedRoutes ?? []).some((route) => route.id === desiredRouteId)
         ? desiredRouteId : undefined,
     };
@@ -1317,7 +1320,7 @@ export const SimplePanel: React.FC<Props> = ({
     };
     const link: BackboneLink = {
       id: `link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name, sourcePopId: origin.id, targetPopId: target.id, color: '#94a3b8', width: 4, routeId: id,
+      name, sourcePopId: origin.id, targetPopId: target.id, color: '#94a3b8', width: 4, technology: newLinkTechnology, routeId: id,
     };
     changeCurrentOptions({ ...current,
       importedRoutes: [...(current.importedRoutes ?? []), route],
@@ -1355,12 +1358,7 @@ export const SimplePanel: React.FC<Props> = ({
 
       // Nome e diagnóstico rápido. textContent evita interpretar texto de query como HTML.
       const label = document.createElement('span');
-      const statusLabel = state === 'down' ? 'DOWN' :
-        state === 'warning' ? 'ATENÇÃO' : state === 'no-data' ? 'SEM DADOS' : state === 'ok' ? 'NORMAL' : '';
-      const reasons = state === 'down' && report.downReason
-        ? [report.downReason.fieldName] :
-        state === 'warning' ? report.warningReasons.map((reason) => reason.fieldName) : [];
-      label.textContent = `${pop.name}${statusLabel ? ` — ${statusLabel}` : ''}${reasons.length ? ` (${reasons.join(', ')})` : ''}`;
+      label.textContent = pop.name;
 
       marker.bindTooltip(label, {
         permanent: options.showPopLabels ?? true,
@@ -1435,6 +1433,7 @@ export const SimplePanel: React.FC<Props> = ({
     linkOriginId,
     linkRouteId,
     linkCreationMethod,
+    newLinkTechnology,
     queryItems,
     options.showPopLabels,
   ]);
@@ -1676,6 +1675,7 @@ export const SimplePanel: React.FC<Props> = ({
 
     setCreatingLink(true);
     setLinkCreationMethod('pops');
+    setNewLinkTechnology('fibra');
     setDrawPoints([]);
     setLinkOriginId(null);
     setLinkTargetId('');
@@ -1948,6 +1948,12 @@ export const SimplePanel: React.FC<Props> = ({
         {creatingLink && (
           <div className="teif-monitor-editor" style={editorCardStyle}>
             <strong>Criar enlace</strong>
+            <label htmlFor="teif-create-link-technology" style={{ fontSize: 12 }}>Tipo do enlace</label>
+            <select id="teif-create-link-technology" style={inputStyle} value={newLinkTechnology}
+              onChange={(event) => setNewLinkTechnology(event.target.value as LinkTechnology)}>
+              <option value="fibra">Fibra — linha contínua</option>
+              <option value="radio">Rádio — linha pontilhada</option>
+            </select>
             <div style={{ display: 'flex', gap: 7 }}>
               <Button size="sm" variant={linkCreationMethod === 'pops' ? 'primary' : 'secondary'}
                 onClick={() => { setLinkCreationMethod('pops'); setDrawPoints([]); }}>Entre POPs</Button>
@@ -2364,6 +2370,12 @@ export const SimplePanel: React.FC<Props> = ({
                 <details className="teif-editor-details">
                   <summary>Aparência do enlace</summary>
                   <div className="teif-editor-details-body">
+                  <label htmlFor="teif-edit-link-technology" style={{ fontSize: 12 }}>Tipo do enlace</label>
+                  <select id="teif-edit-link-technology" style={inputStyle} value={selectedLink.technology ?? 'fibra'}
+                    onChange={(event) => updateLinkProperties(selectedLink.id, { technology: event.target.value as LinkTechnology })}>
+                    <option value="fibra">Fibra — linha contínua</option>
+                    <option value="radio">Rádio — linha pontilhada</option>
+                  </select>
                   <small>Cor manual (apenas sem regra de estado)</small>
                 <input
                   type="color"

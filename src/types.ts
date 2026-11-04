@@ -102,6 +102,8 @@ export interface BackbonePop {
   alertRule?: PopAlertRule;
 }
 
+export type LinkTechnology = 'fibra' | 'radio';
+
 export interface BackboneLink {
   id: string;
   name: string;
@@ -109,6 +111,8 @@ export interface BackboneLink {
   targetPopId: string;
   color: string;
   width: number;
+  /** Meio físico. Omitido = fibra para painéis anteriores. */
+  technology?: LinkTechnology;
   /** Quando definido, desenha o trajeto importado em vez da linha reta. */
   routeId?: string;
   /** Referência(s) ao GeoJSON externo. Os trechos permanecem no arquivo, não no JSON do dashboard. */
