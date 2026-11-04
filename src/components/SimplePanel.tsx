@@ -43,15 +43,21 @@ type SmartGuideSnap = { x?: number; y?: number };
 const SMART_GUIDE_TOLERANCE_PX = 10;
 
 function findSmartGuideSnap(
-  map: L.Map, position: L.LatLng, movingId: string, pops: BackbonePop[]
+  map: L.Map, position: L.LatLng, movingId: string, pops: BackbonePop[],
+  extraAnchors: MapLatLng[] = []
 ): SmartGuideSnap {
   const moving = map.latLngToContainerPoint(position);
   let dx = SMART_GUIDE_TOLERANCE_PX + 1;
   let dy = SMART_GUIDE_TOLERANCE_PX + 1;
   const snap: SmartGuideSnap = {};
-  for (const other of pops) {
-    if (other.id === movingId) { continue; }
-    const point = map.latLngToContainerPoint([other.latitude, other.longitude]);
+  // POPs para o arraste existente; opcionalmente pontos do enlace que está sendo desenhado.
+  const anchors: MapLatLng[] = [
+    ...pops.filter(other => other.id !== movingId)
+      .map(other => [other.latitude, other.longitude] as MapLatLng),
+    ...extraAnchors,
+  ];
+  for (const anchor of anchors) {
+    const point = map.latLngToContainerPoint(L.latLng(anchor[0], anchor[1]));
     const differenceX = Math.abs(moving.x - point.x);
     const differenceY = Math.abs(moving.y - point.y);
     if (differenceX <= SMART_GUIDE_TOLERANCE_PX && differenceX < dx) {
@@ -1565,17 +1571,56 @@ export const SimplePanel: React.FC<Props> = ({
     };
   }, [adding, popCreationMethod]);
 
-  // Desenho manual: os pontos são temporários até clicar em Criar enlace.
+  // Guias inteligentes no desenho manual de enlaces (POPs + vértices anteriores).
+  // Reutiliza o mesmo botão "Guias", as mesmas linhas brancas e a tolerância de 10px.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !creatingLink || linkCreationMethod !== 'draw' || !linkOriginId || !linkTargetId) { return; }
-    const onClick = (event: L.LeafletMouseEvent) => {
-      setDrawPoints(prev => prev.length < 500 ? [...prev, [event.latlng.lat, event.latlng.lng]] : prev);
+    const guideGroup = smartGuidesRef.current;
+    if (!map || !creatingLink || linkCreationMethod !== 'draw' || !linkOriginId || !linkTargetId) {
+      guideGroup?.clearLayers();
+      return;
+    }
+
+    const guideSnap = (position: L.LatLng): SmartGuideSnap => {
+      if (!smartGuides) { return {}; }
+      return findSmartGuideSnap(
+        map, position, '', optionsRef.current.pops ?? [], drawPoints
+      );
     };
+    const snappedPoint = (position: L.LatLng): L.LatLng => {
+      const snap = guideSnap(position);
+      if (snap.x === undefined && snap.y === undefined) { return position; }
+      const pixel = map.latLngToContainerPoint(position);
+      return map.containerPointToLatLng(L.point(snap.x ?? pixel.x, snap.y ?? pixel.y));
+    };
+    const onMove = (event: L.LeafletMouseEvent) => {
+      if (!guideGroup) { return; }
+      if (!smartGuides) { guideGroup.clearLayers(); return; }
+      drawSmartGuideLines(map, guideGroup, guideSnap(event.latlng));
+    };
+    const onClick = (event: L.LeafletMouseEvent) => {
+      const position = snappedPoint(event.latlng);
+      const last = drawPoints[drawPoints.length - 1];
+      if (last && map.latLngToContainerPoint(position).distanceTo(
+        map.latLngToContainerPoint(L.latLng(last[0], last[1]))
+      ) < 4) { return; } // Evita duplicar o vértice anterior.
+      setDrawPoints(prev => prev.length < 500
+        ? [...prev, [position.lat, position.lng]] : prev);
+      guideGroup?.clearLayers();
+    };
+    const onLeave = () => guideGroup?.clearLayers();
+    map.on('mousemove', onMove);
     map.on('click', onClick);
+    map.on('mouseout', onLeave);
     map.getContainer().style.cursor = 'crosshair';
-    return () => { map.off('click', onClick); map.getContainer().style.cursor = ''; };
-  }, [creatingLink, linkCreationMethod, linkOriginId, linkTargetId]);
+    return () => {
+      map.off('mousemove', onMove);
+      map.off('click', onClick);
+      map.off('mouseout', onLeave);
+      guideGroup?.clearLayers();
+      map.getContainer().style.cursor = '';
+    };
+  }, [creatingLink, linkCreationMethod, linkOriginId, linkTargetId, drawPoints, smartGuides]);
 
   useEffect(() => {
     const layer = drawLayerRef.current;
