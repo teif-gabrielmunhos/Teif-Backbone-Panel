@@ -24,6 +24,7 @@ import './editorLayout.css';
 import './darkBasemap.css';
 import './editorUX.css';
 
+import './teifHome.css';
 import type {
   BackbonePop,
   BackboneLink,
@@ -1867,6 +1868,31 @@ export const SimplePanel: React.FC<Props> = ({
           zIndex: 0,
         }}
       />
+
+      {/* TEIF BOTÃO INÍCIO - visão geral do backbone */}
+      <button
+        type="button"
+        className="teif-map-home-button"
+        title="Voltar à visão inicial do backbone"
+        aria-label="Voltar à visão inicial do backbone"
+        onClick={() => {
+          const map = mapRef.current;
+          if (!map) { return; }
+          // Restaura a latitude, longitude e zoom originais carregados no painel.
+          const initial = initialView.current;
+          map.stop();
+          map.closePopup();
+          setSelectedId(null);
+          setSelectedLinkId(null);
+          setSelectedExternalId(null);
+          setActiveEquipmentId(null);
+          setNavigationHistory([]);
+          map.flyTo([initial.latitude, initial.longitude], initial.zoom, { duration: 0.65 });
+        }}
+      >
+        <span className="teif-map-home-icon" aria-hidden="true">⌂</span>
+        <span>Início</span>
+      </button>
 
       {/* BARRA DE FERRAMENTAS */}
       <div
