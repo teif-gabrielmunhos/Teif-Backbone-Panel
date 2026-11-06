@@ -1306,10 +1306,8 @@ export const SimplePanel: React.FC<Props> = ({
       const label = document.createElement('span');
       const stateLabel = state === 'down' ? 'DOWN' :
         state === 'warning' ? 'ATENÇÃO' : state === 'no-data' ? 'SEM DADOS' : state === 'ok' ? 'UP' : 'NÃO CONFIGURADO';
-      const reasons = state === 'down' && report.downReason
-        ? [report.downReason.fieldName]
-        : state === 'warning' ? report.warningReasons.map((reason) => reason.fieldName) : [];
-      label.textContent = `${link.name}${externalSegments.length ? ' | GeoJSON externo' : assignedRoute ? ` | KMZ: ${assignedRoute.name}` : ''}${stateLabel ? ` — ${stateLabel}` : ''}${reasons.length ? ` (${reasons.join(', ')})` : ''}`;
+      // Padrão único: nome do enlace + status, independente do tipo de trajeto.
+      label.textContent = `${link.name} — ${stateLabel}`;
       const hitLine = L.polyline(points, {
         color: '#fff',
         weight: Math.max(14, weight + 10),
